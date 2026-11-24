@@ -9,16 +9,22 @@ type ChatTurn = {
 };
 
 const MARIAM_PERSONA = `أنتِ "مريم"، مساعدة خدمة العملاء لصفحة "The Viral Creature" في تونس.
-قواعدكِ الثابتة:
-1. لهجة تونسية مهنية وواضحة فقط:
-- استعملي حرف النون للمتكلم في المضارع: (نعاونك، نثبّتلك، نشوفلك، نرجعلك). لا تقولي (أساعدك، أقولك، أبعتلك).
-- استعملي: (صباط / سبادري، في الصفحة، تنجم، شنوّة، مرحبا بك، يعطيك الصحة).
-- لا تقولي أبداً: (حذاء، بالصفحة، عشان، عيوني، إيه، أبشر، يا هلا فيك).
+تتحدثين بلهجة تونسية مهنية، طبيعية، وواضحة، وتمنعين أي تخريف أو ارتجال.
+
+قواعد إلزامية:
+1. الموقع والتوصيل:
+- الصفحة تعمل في تونس فقط. يُمنع منعاً باتاً ذكر المغرب أو أي بلد آخر.
+- إذا سأل الزبون "نتوما وين" أو عن التوصيل، وضّحي بلطف أن الصفحة تعمل في تونس، وإذا لم يكن هناك تفصيل مؤكد عن التوصيل أو السعر فقولي إنكِ ستثبّتين وتُعلمينه دون اختلاق مواعيد أو أرقام.
+
+2. اللهجة التونسية:
+- استعملي حرف النون للمتكلم في المضارع: (نعاونك، نثبّتلك، نشوفلك، نرجعلك). لا تقولي أبداً (أساعدك، أقولك، أبعتلك).
+- استعملي: (في تونس، التوصيل، صباط، في الصفحة، شنوّة، تنجم، مرحبا بك، يعطيك الصحة).
+- يُمنع منعاً باتاً استعمال: (المغرب، الدليفرزي، عشان، عيوني، حذاء، بالصفحة، أبشر، يا هلا فيك، إيه).
 - إذا كتب الزبون بالفرنسية أو الإنجليزية، ردي بنفس لغته باختصار ولباقة.
-2. تسلسل المحادثة:
-- اقرئي الرسائل السابقة في نفس المحادثة ولا تكرري الترحيب في كل رد.
-3. الدقة ومنع التخريف:
-- لا تخترعي أسعاراً، مواعيد توصيل، أو توفر منتجات غير مؤكدة. إذا لم يكن واضحاً أو مؤكداً، وضّحي بلطف أنكِ ستثبّتين وتُعلمينه، واسألي سؤالاً قصيراً واحداً.`;
+
+3. السياق ومنع التخريف:
+- اربطي رسائل نفس المحادثة ولا تكرري الترحيب في كل رسالة.
+- لا تخترعي أسعاراً، توفراً، مقاسات، أو وعوداً غير مؤكدة.`;
 
 const processedMessageIds = new Map<string, number>();
 const sessionHistory = new Map<string, ChatTurn[]>();
@@ -68,6 +74,20 @@ function saveTurn(senderId: string, turn: ChatTurn) {
   sessionHistory.set(senderId, [...current, turn].slice(-8));
 }
 
+function hasForbiddenHallucination(text: string): boolean {
+  const forbiddenPatterns = [
+    /المغرب/i,
+    /مغربي/i,
+    /الدليفرزي/i,
+    /عشان/i,
+    /أقولك/i,
+    /أبعتلك/i,
+    /عيوني/i,
+    /حذاء/i,
+  ];
+  return forbiddenPatterns.some((re) => re.test(text));
+}
+
 async function callGeminiOnce(
   apiKey: string,
   model: string,
@@ -100,8 +120,8 @@ async function callGeminiOnce(
           },
         ],
         generationConfig: {
-          temperature: 0.2,
-          maxOutputTokens: 200,
+          temperature: 0.15,
+          maxOutputTokens: 180,
         },
       }),
     });
@@ -142,10 +162,13 @@ async function generateMariamReply(senderId: string, userText: string): Promise<
             ?.map((p: any) => p?.text ?? "")
             .join("")
             .trim() || "";
-        if (replyText) {
+        if (replyText && !hasForbiddenHallucination(replyText)) {
           saveTurn(senderId, { role: "user", text: userText });
           saveTurn(senderId, { role: "assistant", text: replyText });
           return replyText;
+        }
+        if (replyText && hasForbiddenHallucination(replyText)) {
+          console.log(JSON.stringify({ ev: "blocked_hallucination", model, replyText }));
         }
       } catch (e) {
         console.error("DEBUG: Failed parsing Gemini JSON:", e);
@@ -153,7 +176,7 @@ async function generateMariamReply(senderId: string, userText: string): Promise<
     }
   }
 
-  return "فمّا ضغط صغير تَو، عاود ابعث رسالتك وتَو نجاوبك في الحين.";
+  return "نخدمو في تونس، وتَو نثبّتلك في التفاصيل ونرجعلك. شنوّة تحب تعرف بالضبط؟";
 }
 
 async function sendMessage(recipientId: string, text: string) {
