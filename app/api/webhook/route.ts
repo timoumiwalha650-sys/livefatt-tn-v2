@@ -3,7 +3,7 @@ import crypto from "crypto";
 
 export const runtime = "nodejs";
 
-const SYSTEM_PROMPT = `أنتِ "مريم"، مساعدة خدمة العملاء والتواصل لصفحة "The Viral Creature".
+const MARIAM_PERSONA = `أنتِ "مريم"، مساعدة خدمة العملاء والتواصل لصفحة "The Viral Creature".
 أسلوبكِ بشري، دافئ، طبيعي، واضح، ومرن — بعيد تماماً عن الجمود أو الردود الآلية المكررة.
 - افهمي قصد العميل من سؤاله أو رسالته (سواء سأل عن السعر، التفاصيل، التوفر، الطلب، أو ألقى تحية).
 - ردي بنفس لغة العميل وأسلوبه المريح والواضح، مع الحفاظ على الاحترافية واللباقة.
@@ -26,30 +26,21 @@ function verifySignature(rawBody: string, sigHeader: string | null): boolean {
   return crypto.timingSafeEqual(a, b);
 }
 
-async function generateMariamReply(userText: string): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-
-  if (!apiKey) {
-    console.error("DEBUG: GEMINI_API_KEY is missing");
-    return "أهلاً بكِ! وصلتني رسالتك وسنرد عليكِ في أقرب وقت.";
-  }
-
+async function callGeminiModel(apiKey: string, model: string, userText: string) {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const prompt = `${MARIAM_PERSONA}\n\nرسالة العميل:\n${userText}\n\nرد مريم:`;
 
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      systemInstruction: {
-        parts: [{ text: SYSTEM_PROMPT }],
-      },
       contents: [
         {
           role: "user",
-          parts: [{ text: userText }],
+          parts: [{ text: prompt }],
         },
       ],
       generationConfig: {
@@ -59,20 +50,44 @@ async function generateMariamReply(userText: string): Promise<string> {
     }),
   });
 
-  if (!res.ok) {
-    const errText = await res.text();
-    console.error("DEBUG: Gemini API error:", res.status, errText);
-    return "أهلاً بكِ! واجهنا ضغطاً مؤقتاً الآن، أعيدي إرسال سؤالك وسأجيبكِ فوراً.";
+  const textBody = await res.text();
+  return { ok: res.ok, status: res.status, textBody };
+}
+
+async function generateMariamReply(userText: string): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const configuredModel = (process.env.GEMINI_MODEL || "").trim();
+  const candidates = Array.from(
+    new Set([configuredModel, "gemini-2.5-flash", "gemini-2.0-flash"].filter(Boolean))
+  );
+
+  if (!apiKey) {
+    console.error("DEBUG: GEMINI_API_KEY is missing");
+    return "أهلاً بكِ! وصلتني رسالتك وسنرد عليكِ في أقرب وقت.";
   }
 
-  const data: any = await res.json();
-  const replyText =
-    data?.candidates?.[0]?.content?.parts
-      ?.map((p: any) => p?.text ?? "")
-      .join("")
-      .trim() || "";
+  for (const model of candidates) {
+    const attempt = await callGeminiModel(apiKey, model, userText);
+    if (attempt.ok) {
+      try {
+        const data: any = JSON.parse(attempt.textBody);
+        const replyText =
+          data?.candidates?.[0]?.content?.parts
+            ?.map((p: any) => p?.text ?? "")
+            .join("")
+            .trim() || "";
+        if (replyText) {
+          return replyText;
+        }
+      } catch (e) {
+        console.error("DEBUG: Failed parsing Gemini JSON:", e);
+      }
+    } else {
+      console.error(`DEBUG: Gemini API error (${model}) status ${attempt.status}:`, attempt.textBody);
+    }
+  }
 
-  return replyText || "أهلاً بكِ! كيف يمكنني مساعدتكِ اليوم؟";
+  return "أهلاً بكِ! واجهنا ضغطاً مؤقتاً الآن، أعيدي إرسال سؤالك وسأجيبكِ فوراً.";
 }
 
 async function sendMessage(recipientId: string, text: string) {
