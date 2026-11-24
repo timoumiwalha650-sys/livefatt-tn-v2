@@ -27,13 +27,9 @@ function isDuplicateMessage(mid?: string): boolean {
   return false;
 }
 
-function normalizeModelName(rawModel?: string): string {
-  if (!rawModel) return "gemini-3.8-flash";
-  const cleaned = rawModel.replace(/^models\//i, "").trim().toLowerCase();
-  if (!cleaned || cleaned === "gemini-3.8-flash-lite" || cleaned === "gemini-2.5-flash" || cleaned === "gemini-2.0-flash") {
-    return "gemini-3.8-flash";
-  }
-  return cleaned;
+function cleanModel(raw?: string): string {
+  if (!raw) return "";
+  return raw.replace(/^models\//i, "").trim();
 }
 
 function verifySignature(rawBody: string, sigHeader: string | null): boolean {
@@ -52,12 +48,13 @@ function verifySignature(rawBody: string, sigHeader: string | null): boolean {
   return crypto.timingSafeEqual(a, b);
 }
 
-async function callGeminiOnce(apiKey: string, model: string, userText: string, timeoutMs = 12000) {
+async function callGeminiOnce(apiKey: string, model: string, userText: string, timeoutMs = 8000) {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   const prompt = `${MARIAM_PERSONA}\n\nرسالة العميل:\n${userText}\n\nرد مريم:`;
+  const t0 = Date.now();
 
   try {
     const res = await fetch(endpoint, {
@@ -73,44 +70,60 @@ async function callGeminiOnce(apiKey: string, model: string, userText: string, t
         ],
         generationConfig: {
           temperature: 0.75,
-          maxOutputTokens: 220,
+          maxOutputTokens: 350,
         },
       }),
     });
 
     const textBody = await res.text();
+    console.log(
+      JSON.stringify({ ev: "gemini", model, status: res.status, ms: Date.now() - t0 })
+    );
     return { ok: res.ok, status: res.status, textBody };
   } catch (err: any) {
-    return { ok: false, status: 504, textBody: err?.message || "The operation was aborted due to timeout" };
+    console.log(
+      JSON.stringify({ ev: "gemini", model, err: err?.name || "Error", ms: Date.now() - t0 })
+    );
+    return { ok: false, status: 504, textBody: err?.message || "Timeout" };
   }
 }
 
 async function generateMariamReply(userText: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
-  const model = normalizeModelName(process.env.GEMINI_MODEL);
-
   if (!apiKey) {
     console.error("DEBUG: GEMINI_API_KEY is missing");
     return "أهلاً بكِ! وصلتني رسالتك وسنرد عليكِ في أقرب وقت.";
   }
 
-  const attempt = await callGeminiOnce(apiKey, model, userText, 12000);
-  if (attempt.ok) {
-    try {
-      const data: any = JSON.parse(attempt.textBody);
-      const replyText =
-        data?.candidates?.[0]?.content?.parts
-          ?.map((p: any) => p?.text ?? "")
-          .join("")
-          .trim() || "";
-      if (replyText) {
-        return replyText;
+  const configured = cleanModel(process.env.GEMINI_MODEL);
+  const candidates = Array.from(
+    new Set(
+      [
+        configured,
+        "gemini-3.5-flash-lite",
+        "gemini-3.8-flash-lite",
+        "gemini-3.8-flash",
+      ].filter(Boolean)
+    )
+  );
+
+  for (const model of candidates) {
+    const attempt = await callGeminiOnce(apiKey, model, userText, 8000);
+    if (attempt.ok) {
+      try {
+        const data: any = JSON.parse(attempt.textBody);
+        const replyText =
+          data?.candidates?.[0]?.content?.parts
+            ?.map((p: any) => p?.text ?? "")
+            .join("")
+            .trim() || "";
+        if (replyText) {
+          return replyText;
+        }
+      } catch (e) {
+        console.error("DEBUG: Failed parsing Gemini JSON:", e);
       }
-    } catch (e) {
-      console.error("DEBUG: Failed parsing Gemini JSON:", e);
     }
-  } else {
-    console.error(`DEBUG: Gemini API error (${model}) status ${attempt.status}: ${attempt.textBody}`);
   }
 
   return "أهلاً بكِ! واجهنا ضغطاً مؤقتاً الآن، أعيدي إرسال سؤالك وسأجيبكِ فوراً.";
@@ -128,7 +141,7 @@ async function sendMessage(recipientId: string, text: string) {
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(6000),
       body: JSON.stringify({
         recipient: { id: recipientId },
         message: { text },
