@@ -10,8 +10,21 @@ const MARIAM_PERSONA = `أنتِ "مريم"، مساعدة خدمة العملا
 - كوني مختصرة وواضحة دون حشو زائد أو تكرار، واطرحي سؤالاً ذكياً واحداً عند الحاجة لمساعدة العميل على إتمام ما يريد.
 - إذا سأل العميل عن معلومة غير مذكورة لديكِ حالياً (مثل سعر أو تفصيل محدد)، وضّحي له بلطف أنكِ ستؤكدينها له ولا تخترعي أرقاماً أو وعوداً غير مؤكدة.`;
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+const processedMessageIds = new Map<string, number>();
+
+function isDuplicateMessage(mid?: string): boolean {
+  if (!mid) return false;
+  const now = Date.now();
+  for (const [key, ts] of processedMessageIds.entries()) {
+    if (now - ts > 10 * 60 * 1000) {
+      processedMessageIds.delete(key);
+    }
+  }
+  if (processedMessageIds.has(mid)) {
+    return true;
+  }
+  processedMessageIds.set(mid, now);
+  return false;
 }
 
 function normalizeModelName(rawModel?: string, fallback = "gemini-3.8-flash"): string {
@@ -39,22 +52,18 @@ function verifySignature(rawBody: string, sigHeader: string | null): boolean {
   return crypto.timingSafeEqual(a, b);
 }
 
-async function callGeminiWithRetry(apiKey: string, model: string, userText: string) {
+async function callGeminiOnce(apiKey: string, model: string, userText: string, timeoutMs = 6500) {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   const prompt = `${MARIAM_PERSONA}\n\nرسالة العميل:\n${userText}\n\nرد مريم:`;
-  const delays = [0, 600, 1200];
 
-  for (let i = 0; i < delays.length; i++) {
-    if (delays[i] > 0) {
-      await sleep(delays[i]);
-    }
-
+  try {
     const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(timeoutMs),
       body: JSON.stringify({
         contents: [
           {
@@ -64,27 +73,16 @@ async function callGeminiWithRetry(apiKey: string, model: string, userText: stri
         ],
         generationConfig: {
           temperature: 0.75,
-          maxOutputTokens: 400,
+          maxOutputTokens: 350,
         },
       }),
     });
 
     const textBody = await res.text();
-    if (res.ok) {
-      return { ok: true, status: res.status, textBody };
-    }
-
-    console.error(
-      `DEBUG: Gemini API error (${model}) attempt ${i + 1} status ${res.status}:`,
-      textBody
-    );
-
-    if (res.status !== 503 && res.status !== 429) {
-      return { ok: false, status: res.status, textBody };
-    }
+    return { ok: res.ok, status: res.status, textBody };
+  } catch (err: any) {
+    return { ok: false, status: 504, textBody: err?.message || "Timeout" };
   }
-
-  return { ok: false, status: 503, textBody: "UNAVAILABLE after retries" };
 }
 
 async function generateMariamReply(userText: string): Promise<string> {
@@ -102,7 +100,7 @@ async function generateMariamReply(userText: string): Promise<string> {
   }
 
   for (const model of candidates) {
-    const attempt = await callGeminiWithRetry(apiKey, model, userText);
+    const attempt = await callGeminiOnce(apiKey, model, userText, 6500);
     if (attempt.ok) {
       try {
         const data: any = JSON.parse(attempt.textBody);
@@ -117,6 +115,11 @@ async function generateMariamReply(userText: string): Promise<string> {
       } catch (e) {
         console.error("DEBUG: Failed parsing Gemini JSON:", e);
       }
+    } else {
+      console.error(
+        `DEBUG: Gemini API error (${model}) status ${attempt.status}:`,
+        attempt.textBody
+      );
     }
   }
 
@@ -135,6 +138,7 @@ async function sendMessage(recipientId: string, text: string) {
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(6000),
       body: JSON.stringify({
         recipient: { id: recipientId },
         message: { text },
@@ -181,6 +185,11 @@ export async function POST(req: NextRequest) {
         if (ev?.message?.is_echo) {
           continue;
         }
+        const mid = typeof ev?.message?.mid === "string" ? ev.message.mid : undefined;
+        if (isDuplicateMessage(mid)) {
+          continue;
+        }
+
         const senderId = ev?.sender?.id;
         const text = ev?.message?.text;
 
