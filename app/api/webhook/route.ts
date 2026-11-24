@@ -10,6 +10,15 @@ const MARIAM_PERSONA = `أنتِ "مريم"، مساعدة خدمة العملا
 - كوني مختصرة وواضحة دون حشو زائد أو تكرار، واطرحي سؤالاً ذكياً واحداً عند الحاجة لمساعدة العميل على إتمام ما يريد.
 - إذا سأل العميل عن معلومة غير مذكورة لديكِ حالياً (مثل سعر أو تفصيل محدد)، وضّحي له بلطف أنكِ ستؤكدينها له ولا تخترعي أرقاماً أو وعوداً غير مؤكدة.`;
 
+function normalizeModelName(rawModel?: string): string {
+  if (!rawModel) return "gemini-3.8-flash";
+  const cleaned = rawModel.replace(/^models\//i, "").trim().toLowerCase();
+  if (!cleaned || cleaned === "gemini-2.5-flash" || cleaned === "gemini-2.0-flash") {
+    return "gemini-3.8-flash";
+  }
+  return cleaned;
+}
+
 function verifySignature(rawBody: string, sigHeader: string | null): boolean {
   const secret = process.env.FB_APP_SECRET;
   if (!secret) {
@@ -56,10 +65,8 @@ async function callGeminiModel(apiKey: string, model: string, userText: string) 
 
 async function generateMariamReply(userText: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
-  const configuredModel = (process.env.GEMINI_MODEL || "").trim();
-  const candidates = Array.from(
-    new Set([configuredModel, "gemini-2.5-flash", "gemini-2.0-flash"].filter(Boolean))
-  );
+  const primaryModel = normalizeModelName(process.env.GEMINI_MODEL);
+  const candidates = Array.from(new Set([primaryModel, "gemini-3.8-flash"]));
 
   if (!apiKey) {
     console.error("DEBUG: GEMINI_API_KEY is missing");
@@ -83,7 +90,10 @@ async function generateMariamReply(userText: string): Promise<string> {
         console.error("DEBUG: Failed parsing Gemini JSON:", e);
       }
     } else {
-      console.error(`DEBUG: Gemini API error (${model}) status ${attempt.status}:`, attempt.textBody);
+      console.error(
+        `DEBUG: Gemini API error (${model}) status ${attempt.status}:`,
+        attempt.textBody
+      );
     }
   }
 
