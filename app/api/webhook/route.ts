@@ -10,11 +10,15 @@ const MARIAM_PERSONA = `أنتِ "مريم"، مساعدة خدمة العملا
 - كوني مختصرة وواضحة دون حشو زائد أو تكرار، واطرحي سؤالاً ذكياً واحداً عند الحاجة لمساعدة العميل على إتمام ما يريد.
 - إذا سأل العميل عن معلومة غير مذكورة لديكِ حالياً (مثل سعر أو تفصيل محدد)، وضّحي له بلطف أنكِ ستؤكدينها له ولا تخترعي أرقاماً أو وعوداً غير مؤكدة.`;
 
-function normalizeModelName(rawModel?: string): string {
-  if (!rawModel) return "gemini-3.8-flash";
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeModelName(rawModel?: string, fallback = "gemini-3.8-flash"): string {
+  if (!rawModel) return fallback;
   const cleaned = rawModel.replace(/^models\//i, "").trim().toLowerCase();
   if (!cleaned || cleaned === "gemini-2.5-flash" || cleaned === "gemini-2.0-flash") {
-    return "gemini-3.8-flash";
+    return fallback;
   }
   return cleaned;
 }
@@ -35,38 +39,62 @@ function verifySignature(rawBody: string, sigHeader: string | null): boolean {
   return crypto.timingSafeEqual(a, b);
 }
 
-async function callGeminiModel(apiKey: string, model: string, userText: string) {
+async function callGeminiWithRetry(apiKey: string, model: string, userText: string) {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   const prompt = `${MARIAM_PERSONA}\n\nرسالة العميل:\n${userText}\n\nرد مريم:`;
+  const delays = [0, 600, 1200];
 
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: prompt }],
+  for (let i = 0; i < delays.length; i++) {
+    if (delays[i] > 0) {
+      await sleep(delays[i]);
+    }
+
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.75,
+          maxOutputTokens: 400,
         },
-      ],
-      generationConfig: {
-        temperature: 0.75,
-        maxOutputTokens: 400,
-      },
-    }),
-  });
+      }),
+    });
 
-  const textBody = await res.text();
-  return { ok: res.ok, status: res.status, textBody };
+    const textBody = await res.text();
+    if (res.ok) {
+      return { ok: true, status: res.status, textBody };
+    }
+
+    console.error(
+      `DEBUG: Gemini API error (${model}) attempt ${i + 1} status ${res.status}:`,
+      textBody
+    );
+
+    if (res.status !== 503 && res.status !== 429) {
+      return { ok: false, status: res.status, textBody };
+    }
+  }
+
+  return { ok: false, status: 503, textBody: "UNAVAILABLE after retries" };
 }
 
 async function generateMariamReply(userText: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
-  const primaryModel = normalizeModelName(process.env.GEMINI_MODEL);
-  const candidates = Array.from(new Set([primaryModel, "gemini-3.8-flash"]));
+  const primaryModel = normalizeModelName(process.env.GEMINI_MODEL, "gemini-3.8-flash");
+  const fallbackModel = normalizeModelName(
+    process.env.GEMINI_FALLBACK_MODEL,
+    "gemini-3.8-flash-lite"
+  );
+  const candidates = Array.from(new Set([primaryModel, fallbackModel]));
 
   if (!apiKey) {
     console.error("DEBUG: GEMINI_API_KEY is missing");
@@ -74,7 +102,7 @@ async function generateMariamReply(userText: string): Promise<string> {
   }
 
   for (const model of candidates) {
-    const attempt = await callGeminiModel(apiKey, model, userText);
+    const attempt = await callGeminiWithRetry(apiKey, model, userText);
     if (attempt.ok) {
       try {
         const data: any = JSON.parse(attempt.textBody);
@@ -89,11 +117,6 @@ async function generateMariamReply(userText: string): Promise<string> {
       } catch (e) {
         console.error("DEBUG: Failed parsing Gemini JSON:", e);
       }
-    } else {
-      console.error(
-        `DEBUG: Gemini API error (${model}) status ${attempt.status}:`,
-        attempt.textBody
-      );
     }
   }
 
