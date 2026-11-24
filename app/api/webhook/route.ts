@@ -8,37 +8,20 @@ type ChatTurn = {
   text: string;
 };
 
-const MARIAM_PERSONA = `أنتِ "مريم"، مساعدة خدمة العملاء والتواصل لصفحة "The Viral Creature" في تونس.
-تتحدثين مع الزبون كإنسانة تونسية حقيقية، ذكية، قريبة، ومحترفة، وتربطين كل رسائله السابقة ببعضها.
-
-1. قواعد اللهجة التونسية الصارمة (إلزامية 100%):
-- اكتبِي باللهجة التونسية المحترفة والطبيعية فقط.
-- قاعدة النون في المضارع للمتكلم: استعملي دائماً حرف النون في الفعل المضارع للمتكلم: ("نعاونك"، "نثبّتلك"، "نجيبلك"، "نعطيك"، "نشوفلك"، "نرجعلك"). يُمنع تماماً استعمال الهمزة مثل ("أساعدك"، "أجيبلك"، "أعطيك").
-- استعملي المفردات التونسية الأصيلة:
-  * نقول "صباط" أو "سبادري" (وليس "حذاء").
-  * نقول "في الصفحة" (وليس "بالصفحة").
-  * نقول "لو تنجم" أو "تنجم" (وليس "لو تقدر").
-  * نقول "باش" (وليس "عشان").
-  * نقول "شنوّة" (وليس "إيش" أو "شو").
-  * نقول "حاضر" أو "بكل سرور" أو "مرحبا بك" (يُمنع تماماً: "عيوني"، "أبشر"، "يا هلا فيك"، "بتلبق"، "دلوقتي"، "حاجة").
-- التناسق النحوي التونسي: نقول "اللي شفتو في الصفحة" أو "اللي شفتيه في الصفحة" (وليس "معين شفناه").
-- إذا كتب الزبون بالفرنسية أو الإنجليزية، ردي بنفس لغته بأسلوب مهذب ومختصر.
-
-2. قواعد ربط المحادثة والذاكرة:
-- اقرئي سجل المحادثة السابق بعناية واربطي كل رسائل الزبون ببعضها (مثلاً: إذا سأل عن السوم، ثم قال "صباط نايك"، ثم قال "اللي لونو أكحل/أسود"، فافهمي فوراً أنه يقصد سوم الصباط النايك الأسود ولا تسأليه من جديد عن نوع المنتج!).
-- لا تكرري الترحيب ("مرحبا بك" / "أهلاً بك") في كل رسالة؛ رحّبي في بداية المحادثة فقط، وفي الردود التالية ادخلي مباشرة في الجواب بذكاء وسلاسة.
-
-3. قواعد الدقة ومنع التخريف:
-- لا تخترعي أبداً أسعاراً، عروضاً، مواعيد توصيل، أو مقاسات غير مؤكدة.
-- كوني مختصرة، واضحة، وطبيعية جداً.
-
-أمثلة على أسلوبكِ التونسي الصحيح:
-- الزبون: "السوم بربي" -> مريم: "مرحبا بك! يعطيك الصحة على سؤالك. على أنا منتج بالضبط تحب تعرف السوم؟"
-- الزبون: "الصباط النايك" -> مريم: "فهمتك، قصدك على الصباط النايك اللي في الصفحة. لو تنجم تبعثلي تصورتو أو تقلي أما لون بالضبط باش نثبّتلك في سومو وتفاصيلو ونرجعلك."
-- الزبون: "اللي لونو اسود" -> مريم: "واضح، الصباط النايك الأسود. تَو نثبّتلك في سومو الدقيق والـ pointures المتوفرة ونرجعلك في أقرب وقت."`;
+const MARIAM_PERSONA = `أنتِ "مريم"، مساعدة خدمة العملاء لصفحة "The Viral Creature" في تونس.
+قواعدكِ الثابتة:
+1. لهجة تونسية مهنية وواضحة فقط:
+- استعملي حرف النون للمتكلم في المضارع: (نعاونك، نثبّتلك، نشوفلك، نرجعلك). لا تقولي (أساعدك، أقولك، أبعتلك).
+- استعملي: (صباط / سبادري، في الصفحة، تنجم، شنوّة، مرحبا بك، يعطيك الصحة).
+- لا تقولي أبداً: (حذاء، بالصفحة، عشان، عيوني، إيه، أبشر، يا هلا فيك).
+- إذا كتب الزبون بالفرنسية أو الإنجليزية، ردي بنفس لغته باختصار ولباقة.
+2. تسلسل المحادثة:
+- اقرئي الرسائل السابقة في نفس المحادثة ولا تكرري الترحيب في كل رد.
+3. الدقة ومنع التخريف:
+- لا تخترعي أسعاراً، مواعيد توصيل، أو توفر منتجات غير مؤكدة. إذا لم يكن واضحاً أو مؤكداً، وضّحي بلطف أنكِ ستثبّتين وتُعلمينه، واسألي سؤالاً قصيراً واحداً.`;
 
 const processedMessageIds = new Map<string, number>();
-const localMemory = new Map<string, ChatTurn[]>();
+const sessionHistory = new Map<string, ChatTurn[]>();
 
 function isDuplicateMessage(mid?: string): boolean {
   if (!mid) return false;
@@ -76,58 +59,13 @@ function verifySignature(rawBody: string, sigHeader: string | null): boolean {
   return crypto.timingSafeEqual(a, b);
 }
 
-async function fetchConversationHistory(senderId: string): Promise<ChatTurn[]> {
-  const token = process.env.FB_PAGE_ACCESS_TOKEN;
-  if (!token) {
-    return localMemory.get(senderId) || [];
-  }
-
-  try {
-    const url = `https://graph.facebook.com/v21.0/me/conversations?platform=messenger&user_id=${encodeURIComponent(
-      senderId
-    )}&fields=messages.limit(8){message,from,created_time}&access_token=${encodeURIComponent(
-      token
-    )}`;
-
-    const res = await fetch(url, {
-      method: "GET",
-      signal: AbortSignal.timeout(2500),
-    });
-
-    if (!res.ok) {
-      return localMemory.get(senderId) || [];
-    }
-
-    const data: any = await res.json();
-    const rawMessages = data?.data?.[0]?.messages?.data;
-    if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
-      return localMemory.get(senderId) || [];
-    }
-
-    const turns: ChatTurn[] = rawMessages
-      .slice()
-      .reverse()
-      .filter((m: any) => typeof m?.message === "string" && m.message.trim().length > 0)
-      .map((m: any) => ({
-        role: m?.from?.id === senderId ? "user" : "assistant",
-        text: m.message.trim(),
-      }));
-
-    if (turns.length > 0) {
-      localMemory.set(senderId, turns);
-      return turns;
-    }
-  } catch {
-    // Fallback to in-memory history if Graph API conversation fetch times out
-  }
-
-  return localMemory.get(senderId) || [];
+function getHistory(senderId: string): ChatTurn[] {
+  return sessionHistory.get(senderId) || [];
 }
 
-function appendLocalTurn(senderId: string, turn: ChatTurn) {
-  const existing = localMemory.get(senderId) || [];
-  const updated = [...existing, turn].slice(-10);
-  localMemory.set(senderId, updated);
+function saveTurn(senderId: string, turn: ChatTurn) {
+  const current = sessionHistory.get(senderId) || [];
+  sessionHistory.set(senderId, [...current, turn].slice(-8));
 }
 
 async function callGeminiOnce(
@@ -141,14 +79,12 @@ async function callGeminiOnce(
     model
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-  const formattedHistory =
+  const historyText =
     history.length > 0
-      ? history
-          .map((t) => `${t.role === "user" ? "الزبون" : "مريم"}: ${t.text}`)
-          .join("\n")
-      : "لا توجد رسائل سابقة (هذه أول رسالة في المحادثة).";
+      ? history.map((t) => `${t.role === "user" ? "الزبون" : "مريم"}: ${t.text}`).join("\n")
+      : "بداية المحادثة.";
 
-  const prompt = `${MARIAM_PERSONA}\n\nسجل المحادثة السابق مع هذا الزبون:\n${formattedHistory}\n\nالرسالة الحالية من الزبون:\n${currentUserText}\n\nرد مريم (بالتونسي المحترف ومباشرة في السياق):`;
+  const prompt = `${MARIAM_PERSONA}\n\nالمحادثة السابقة:\n${historyText}\n\nالرسالة الجديدة من الزبون:\n${currentUserText}\n\nرد مريم:`;
   const t0 = Date.now();
 
   try {
@@ -164,8 +100,8 @@ async function callGeminiOnce(
           },
         ],
         generationConfig: {
-          temperature: 0.45,
-          maxOutputTokens: 250,
+          temperature: 0.2,
+          maxOutputTokens: 200,
         },
       }),
     });
@@ -190,19 +126,14 @@ async function generateMariamReply(senderId: string, userText: string): Promise<
     return "مرحبا بك! وصلتنا رسالتك وتَو نرجعولك في أقرب وقت.";
   }
 
-  const history = await fetchConversationHistory(senderId);
-  const trimmedHistory =
-    history.length > 0 && history[history.length - 1].text === userText
-      ? history.slice(0, -1)
-      : history;
-
+  const history = getHistory(senderId);
   const configured = cleanModel(process.env.GEMINI_MODEL);
   const candidates = Array.from(
     new Set(["gemini-3.5-flash-lite", configured, "gemini-3.8-flash-lite"].filter(Boolean))
   ).slice(0, 2);
 
   for (const model of candidates) {
-    const attempt = await callGeminiOnce(apiKey, model, trimmedHistory, userText, 5000);
+    const attempt = await callGeminiOnce(apiKey, model, history, userText, 5000);
     if (attempt.ok) {
       try {
         const data: any = JSON.parse(attempt.textBody);
@@ -212,8 +143,8 @@ async function generateMariamReply(senderId: string, userText: string): Promise<
             .join("")
             .trim() || "";
         if (replyText) {
-          appendLocalTurn(senderId, { role: "user", text: userText });
-          appendLocalTurn(senderId, { role: "assistant", text: replyText });
+          saveTurn(senderId, { role: "user", text: userText });
+          saveTurn(senderId, { role: "assistant", text: replyText });
           return replyText;
         }
       } catch (e) {
