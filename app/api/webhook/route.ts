@@ -3,12 +3,18 @@ import crypto from "crypto";
 
 export const runtime = "nodejs";
 
-const MARIAM_PERSONA = `أنتِ "مريم"، مساعدة خدمة العملاء والتواصل لصفحة "The Viral Creature".
-أسلوبكِ بشري، دافئ، طبيعي، واضح، ومرن — بعيد تماماً عن الجمود أو الردود الآلية المكررة.
-- افهمي قصد العميل من سؤاله أو رسالته (سواء سأل عن السعر، التفاصيل، التوفر، الطلب، أو ألقى تحية).
-- ردي بنفس لغة العميل وأسلوبه المريح والواضح، مع الحفاظ على الاحترافية واللباقة.
-- كوني مختصرة وواضحة دون حشو زائد أو تكرار، واطرحي سؤالاً ذكياً واحداً عند الحاجة لمساعدة العميل على إتمام ما يريد.
-- إذا سأل العميل عن معلومة غير مذكورة لديكِ حالياً (مثل سعر أو تفصيل محدد)، وضّحي له بلطف أنكِ ستؤكدينها له ولا تخترعي أرقاماً أو وعوداً غير مؤكدة.`;
+const MARIAM_PERSONA = `أنتِ "مريم"، مساعدة خدمة العملاء والتواصل لصفحة "The Viral Creature" في تونس.
+هدفكِ أن يشعر الزبون أنه يتحدث مع إنسانة حقيقية، قريبة، محترفة، وموثوقة، لا مع روبوت.
+
+قواعد اللغة والأسلوب:
+- تحدّثي باللهجة التونسية المحترفة، الراقية، والواضحة (بعيدة عن العامية المبتذلة، وبعيدة تماماً عن الكلمات المصرية أو الشامية أو اللغة البيضاء المصطنعة).
+- استعملي تعبيرات تونسية طبيعية ومهذبة مثل: "أهلاً بك / مرحبا بك"، "كيفاش نعاونك اليوم؟"، "يعطيك الصحة"، "نثبّتلك ونرجعلك"، "شنوّة تحب تعرف بالضبط؟".
+- إذا راسلكِ الزبون بالفرنسية أو الإنجليزية بوضوح، ردي بنفس لغته بأسلوب مهذب ومختصر؛ وإذا كتب بالعربية أو التونسية، التزمي بالتونسية المحترفة.
+
+قواعد الدقة ومنع التخريف:
+- لا تخترعي أبداً أسعاراً، عروضاً، مواعيد توصيل، أو مواصفات منتج غير مذكورة صراحةً.
+- إذا سأل الزبون عن السعر، التوفر، أو تفصيل غير متوفر لديكِ حالياً، قولي بوضوح ولباقة باللهجة التونسية إنكِ ستثبّتين المعلومة الدقيقة وتُعلمينه، ثم اسأليه سؤالاً واحداً مفيداً لمساعدته.
+- كوني مختصرة، طبيعية، وغير مكررة، ولا تكرري اسم الصفحة في كل رسالة بشكل آلي.`;
 
 const processedMessageIds = new Map<string, number>();
 
@@ -48,12 +54,12 @@ function verifySignature(rawBody: string, sigHeader: string | null): boolean {
   return crypto.timingSafeEqual(a, b);
 }
 
-async function callGeminiOnce(apiKey: string, model: string, userText: string, timeoutMs = 8000) {
+async function callGeminiOnce(apiKey: string, model: string, userText: string, timeoutMs = 4500) {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-  const prompt = `${MARIAM_PERSONA}\n\nرسالة العميل:\n${userText}\n\nرد مريم:`;
+  const prompt = `${MARIAM_PERSONA}\n\nرسالة الزبون:\n${userText}\n\nرد مريم:`;
   const t0 = Date.now();
 
   try {
@@ -69,8 +75,8 @@ async function callGeminiOnce(apiKey: string, model: string, userText: string, t
           },
         ],
         generationConfig: {
-          temperature: 0.75,
-          maxOutputTokens: 350,
+          temperature: 0.65,
+          maxOutputTokens: 250,
         },
       }),
     });
@@ -92,23 +98,16 @@ async function generateMariamReply(userText: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     console.error("DEBUG: GEMINI_API_KEY is missing");
-    return "أهلاً بكِ! وصلتني رسالتك وسنرد عليكِ في أقرب وقت.";
+    return "أهلاً بك! وصلتنا رسالتك وسنرجع لك في أقرب وقت.";
   }
 
   const configured = cleanModel(process.env.GEMINI_MODEL);
   const candidates = Array.from(
-    new Set(
-      [
-        configured,
-        "gemini-3.5-flash-lite",
-        "gemini-3.8-flash-lite",
-        "gemini-3.8-flash",
-      ].filter(Boolean)
-    )
-  );
+    new Set(["gemini-3.5-flash-lite", configured, "gemini-3.8-flash-lite"].filter(Boolean))
+  ).slice(0, 2);
 
   for (const model of candidates) {
-    const attempt = await callGeminiOnce(apiKey, model, userText, 8000);
+    const attempt = await callGeminiOnce(apiKey, model, userText, 4500);
     if (attempt.ok) {
       try {
         const data: any = JSON.parse(attempt.textBody);
@@ -126,7 +125,7 @@ async function generateMariamReply(userText: string): Promise<string> {
     }
   }
 
-  return "أهلاً بكِ! واجهنا ضغطاً مؤقتاً الآن، أعيدي إرسال سؤالك وسأجيبكِ فوراً.";
+  return "أهلاً بك! فمّا ضغط صغير توا، عاود ابعث سؤالك وسنرجع لك في أقرب وقت.";
 }
 
 async function sendMessage(recipientId: string, text: string) {
@@ -141,7 +140,7 @@ async function sendMessage(recipientId: string, text: string) {
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(5000),
       body: JSON.stringify({
         recipient: { id: recipientId },
         message: { text },
