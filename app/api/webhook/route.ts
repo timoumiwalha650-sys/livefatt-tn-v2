@@ -3,14 +3,19 @@ import crypto from "crypto";
 
 export const runtime = "nodejs";
 
+const SYSTEM_PROMPT = `أنتِ "مريم"، مساعدة خدمة العملاء والتواصل لصفحة "The Viral Creature".
+أسلوبكِ بشري، دافئ، طبيعي، واضح، ومرن — بعيد تماماً عن الجمود أو الردود الآلية المكررة.
+- افهمي قصد العميل من سؤاله أو رسالته (سواء سأل عن السعر، التفاصيل، التوفر، الطلب، أو ألقى تحية).
+- ردي بنفس لغة العميل وأسلوبه المريح والواضح، مع الحفاظ على الاحترافية واللباقة.
+- كوني مختصرة وواضحة دون حشو زائد أو تكرار، واطرحي سؤالاً ذكياً واحداً عند الحاجة لمساعدة العميل على إتمام ما يريد.
+- إذا سأل العميل عن معلومة غير مذكورة لديكِ حالياً (مثل سعر أو تفصيل محدد)، وضّحي له بلطف أنكِ ستؤكدينها له ولا تخترعي أرقاماً أو وعوداً غير مؤكدة.`;
+
 function verifySignature(rawBody: string, sigHeader: string | null): boolean {
   const secret = process.env.FB_APP_SECRET;
   if (!secret) {
-    console.log("DEBUG: FB_APP_SECRET is missing, skipping signature check");
     return true;
   }
   if (!sigHeader || !sigHeader.startsWith("sha256=")) {
-    console.error("DEBUG: Missing or invalid x-hub-signature-256 header");
     return false;
   }
   const expected =
@@ -19,6 +24,55 @@ function verifySignature(rawBody: string, sigHeader: string | null): boolean {
   const b = Buffer.from(expected);
   if (a.length !== b.length) return false;
   return crypto.timingSafeEqual(a, b);
+}
+
+async function generateMariamReply(userText: string): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+
+  if (!apiKey) {
+    console.error("DEBUG: GEMINI_API_KEY is missing");
+    return "أهلاً بكِ! وصلتني رسالتك وسنرد عليكِ في أقرب وقت.";
+  }
+
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model
+  )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{ text: SYSTEM_PROMPT }],
+      },
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: userText }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.75,
+        maxOutputTokens: 400,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error("DEBUG: Gemini API error:", res.status, errText);
+    return "أهلاً بكِ! واجهنا ضغطاً مؤقتاً الآن، أعيدي إرسال سؤالك وسأجيبكِ فوراً.";
+  }
+
+  const data: any = await res.json();
+  const replyText =
+    data?.candidates?.[0]?.content?.parts
+      ?.map((p: any) => p?.text ?? "")
+      .join("")
+      .trim() || "";
+
+  return replyText || "أهلاً بكِ! كيف يمكنني مساعدتكِ اليوم؟";
 }
 
 async function sendMessage(recipientId: string, text: string) {
@@ -68,28 +122,23 @@ export async function POST(req: NextRequest) {
   try {
     body = JSON.parse(rawBody);
   } catch {
-    console.error("DEBUG: Failed to parse JSON body");
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-
-  console.log("DEBUG: Incoming webhook object:", body?.object, "entries:", body?.entry?.length ?? 0);
 
   if (body?.object === "page" && Array.isArray(body?.entry)) {
     for (const entry of body.entry) {
       const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
-      console.log("DEBUG: Messaging events count:", messaging.length);
 
       for (const ev of messaging) {
         if (ev?.message?.is_echo) {
-          console.log("DEBUG: Skipped is_echo message");
           continue;
         }
         const senderId = ev?.sender?.id;
         const text = ev?.message?.text;
-        console.log("DEBUG: Event senderId:", senderId, "text:", text);
 
-        if (senderId && text) {
-          await sendMessage(String(senderId), `تم استلام رسالتك: ${String(text)}`);
+        if (senderId && typeof text === "string" && text.trim().length > 0) {
+          const reply = await generateMariamReply(text.trim());
+          await sendMessage(String(senderId), reply);
         }
       }
     }
