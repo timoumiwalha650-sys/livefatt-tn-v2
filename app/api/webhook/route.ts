@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Redis } from "@upstash/redis";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,25 +15,22 @@ const PAGE_ACCESS_TOKEN =
 
 const GRAPH_API_VERSION = process.env.FB_GRAPH_VERSION || "v24.0";
 
-const redis =
-  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
-    ? new Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN,
-      })
-    : null;
+const DEDUPE_TTL_MS = 10 * 60 * 1000;
+const seenEvents = new Map<string, number>();
 
-async function isDuplicateEvent(key: string): Promise<boolean> {
-  if (!redis) return false;
-  try {
-    const existing = await redis.get(key);
-    if (existing) return true;
-    await redis.set(key, "1", { ex: 600 });
-    return false;
-  } catch (err) {
-    console.error("[webhook] redis dedupe err:", err);
-    return false;
+function isDuplicateEvent(key: string): boolean {
+  const now = Date.now();
+  for (const [k, exp] of seenEvents.entries()) {
+    if (exp <= now) {
+      seenEvents.delete(k);
+    }
   }
+  const existingExp = seenEvents.get(key);
+  if (existingExp && existingExp > now) {
+    return true;
+  }
+  seenEvents.set(key, now + DEDUPE_TTL_MS);
+  return false;
 }
 
 async function sendCommentReply(commentId: string, message: string) {
@@ -143,7 +139,7 @@ export async function POST(req: NextRequest) {
             }
 
             const dedupeKey = `feed_comment_${commentId}`;
-            if (await isDuplicateEvent(dedupeKey)) {
+            if (isDuplicateEvent(dedupeKey)) {
               console.log("[webhook] duplicate comment skipped:", commentId);
               continue;
             }
