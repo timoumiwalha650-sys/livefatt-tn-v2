@@ -9,22 +9,22 @@ type ChatTurn = {
 };
 
 const MARIAM_PERSONA = `أنتِ "مريم"، مساعدة خدمة العملاء لصفحة "The Viral Creature" في تونس.
-تتحدثين بلهجة تونسية مهنية، طبيعية، وواضحة، وتمنعين أي تخريف أو ارتجال.
+تتحدثين بلهجة تونسية مهنية، واضحة، وطبيعية، وتتعاملين مع كل محادثة كسلسلة متصلة.
 
-قواعد إلزامية:
-1. الموقع والتوصيل:
-- الصفحة تعمل في تونس فقط. يُمنع منعاً باتاً ذكر المغرب أو أي بلد آخر.
-- إذا سأل الزبون "نتوما وين" أو عن التوصيل، وضّحي بلطف أن الصفحة تعمل في تونس، وإذا لم يكن هناك تفصيل مؤكد عن التوصيل أو السعر فقولي إنكِ ستثبّتين وتُعلمينه دون اختلاق مواعيد أو أرقام.
+1. الترحيب واللباقة:
+- استعملي "مرحبا بك" أو "أهلاً بك" في بداية المحادثة فقط عندما لا توجد رسائل سابقة.
+- في باقي المحادثة، لا تكرري الترحيب عشوائياً في كل رد؛ رحّبي أو أظهري لباقة فقط عند الشكر ("يعطيك الصحة" / "بلا مزية") أو عند ذكر الاسم ("تشرفنا بك [الاسم]") أو عند إتمام معطيات واضحة.
 
-2. اللهجة التونسية:
-- استعملي حرف النون للمتكلم في المضارع: (نعاونك، نثبّتلك، نشوفلك، نرجعلك). لا تقولي أبداً (أساعدك، أقولك، أبعتلك).
-- استعملي: (في تونس، التوصيل، صباط، في الصفحة، شنوّة، تنجم، مرحبا بك، يعطيك الصحة).
-- يُمنع منعاً باتاً استعمال: (المغرب، الدليفرزي، عشان، عيوني، حذاء، بالصفحة، أبشر، يا هلا فيك، إيه).
-- إذا كتب الزبون بالفرنسية أو الإنجليزية، ردي بنفس لغته باختصار ولباقة.
+2. الارتباط بالسؤال والرد السابق:
+- أجيبي مباشرة على آخر سؤال أو معلومة أضافها الزبون مع البناء على الرسائل والردود السابقة في نفس المحادثة.
+- لا تعيدي شرح ما تم قوله سابقاً ولا تجيبي بإجابة لا تنطبق على السؤال.
+- لا تخترعي أسعاراً، مواعيد توصيل، أو توفراً غير مؤكد؛ إذا لم تكن المعلومة مؤكدة، وضّحي أنكِ ستثبّتينها وتُعلمينه.
 
-3. السياق ومنع التخريف:
-- اربطي رسائل نفس المحادثة ولا تكرري الترحيب في كل رسالة.
-- لا تخترعي أسعاراً، توفراً، مقاسات، أو وعوداً غير مؤكدة.`;
+3. اللهجة التونسية:
+- استعملي حرف النون للمتكلم في المضارع: (نعاونك، نثبّتلك، نشوفلك، نرجعلك). لا تقولي (أساعدك، أقولك، أبعتلك).
+- استعملي: (في تونس، التوصيل، صباط، في الصفحة، شنوّة، تنجم، يعطيك الصحة).
+- لا تقولي: (المغرب، الدليفرزي، عشان، عيوني، حذاء، بالصفحة، أبشر، يا هلا فيك، إيه).
+- إذا كتب الزبون بالفرنسية أو الإنجليزية، ردي بنفس لغته باختصار ولباقة.`;
 
 const processedMessageIds = new Map<string, number>();
 const sessionHistory = new Map<string, ChatTurn[]>();
@@ -71,7 +71,7 @@ function getHistory(senderId: string): ChatTurn[] {
 
 function saveTurn(senderId: string, turn: ChatTurn) {
   const current = sessionHistory.get(senderId) || [];
-  sessionHistory.set(senderId, [...current, turn].slice(-8));
+  sessionHistory.set(senderId, [...current, turn].slice(-12));
 }
 
 function hasForbiddenHallucination(text: string): boolean {
@@ -99,12 +99,24 @@ async function callGeminiOnce(
     model
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-  const historyText =
-    history.length > 0
-      ? history.map((t) => `${t.role === "user" ? "الزبون" : "مريم"}: ${t.text}`).join("\n")
-      : "بداية المحادثة.";
+  const isFirstTurn = history.length === 0;
+  const historyText = isFirstTurn
+    ? "لا توجد رسائل سابقة (هذه أول رسالة في المحادثة)."
+    : history
+        .map((t) => `${t.role === "user" ? "الزبون" : "مريم"}: ${t.text}`)
+        .join("\n");
 
-  const prompt = `${MARIAM_PERSONA}\n\nالمحادثة السابقة:\n${historyText}\n\nالرسالة الجديدة من الزبون:\n${currentUserText}\n\nرد مريم:`;
+  const prompt = `${MARIAM_PERSONA}
+
+حالة المحادثة: ${isFirstTurn ? "بداية المحادثة (أول رسالة)" : "محادثة مستمرة (تجنبي تكرار الترحيب العشوائي)"}
+المحادثة السابقة:
+${historyText}
+
+الرسالة الحالية من الزبون:
+${currentUserText}
+
+رد مريم:`;
+
   const t0 = Date.now();
 
   try {
@@ -141,12 +153,16 @@ async function callGeminiOnce(
 
 async function generateMariamReply(senderId: string, userText: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
+  const history = getHistory(senderId);
+  const hasPriorTurns = history.length > 0;
+
   if (!apiKey) {
     console.error("DEBUG: GEMINI_API_KEY is missing");
-    return "مرحبا بك! وصلتنا رسالتك وتَو نرجعولك في أقرب وقت.";
+    return hasPriorTurns
+      ? "تَو نثبّتلك ونرجعلك في أقرب وقت."
+      : "مرحبا بك! وصلتنا رسالتك وتَو نرجعولك في أقرب وقت.";
   }
 
-  const history = getHistory(senderId);
   const configured = cleanModel(process.env.GEMINI_MODEL);
   const candidates = Array.from(
     new Set(["gemini-3.5-flash-lite", configured, "gemini-3.8-flash-lite"].filter(Boolean))
@@ -162,13 +178,16 @@ async function generateMariamReply(senderId: string, userText: string): Promise<
             ?.map((p: any) => p?.text ?? "")
             .join("")
             .trim() || "";
+
         if (replyText && !hasForbiddenHallucination(replyText)) {
           saveTurn(senderId, { role: "user", text: userText });
           saveTurn(senderId, { role: "assistant", text: replyText });
           return replyText;
         }
         if (replyText && hasForbiddenHallucination(replyText)) {
-          console.log(JSON.stringify({ ev: "blocked_hallucination", model, replyText }));
+          console.log(
+            JSON.stringify({ ev: "blocked_hallucination", model, replyText })
+          );
         }
       } catch (e) {
         console.error("DEBUG: Failed parsing Gemini JSON:", e);
@@ -176,7 +195,11 @@ async function generateMariamReply(senderId: string, userText: string): Promise<
     }
   }
 
-  return "نخدمو في تونس، وتَو نثبّتلك في التفاصيل ونرجعلك. شنوّة تحب تعرف بالضبط؟";
+  // نحفظ رسالة الزبون فقط دون حشو الذاكرة بنص احتياطي مكرر
+  saveTurn(senderId, { role: "user", text: userText });
+  return hasPriorTurns
+    ? "تَو نثبّتلك في النقطة هاذي ونرجعلك."
+    : "مرحبا بك! تَو نثبّتلك في سؤالك ونرجعلك.";
 }
 
 async function sendMessage(recipientId: string, text: string) {
