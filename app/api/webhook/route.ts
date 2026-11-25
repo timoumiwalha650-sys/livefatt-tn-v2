@@ -1,470 +1,163 @@
 import { NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
+import { Redis } from "@upstash/redis";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-type ChatTurn = {
-  role: "user" | "assistant";
-  text: string;
-};
+const VERIFY_TOKEN =
+  process.env.FB_VERIFY_TOKEN ||
+  process.env.WEBHOOK_VERIFY_TOKEN ||
+  "livefatt_verify_token_2026";
 
-const THIRTY_DAYS_SECONDS = 30 * 24 * 60 * 60; // 2592000 ثانية = شهر كامل
+const PAGE_ACCESS_TOKEN =
+  process.env.FB_PAGE_ACCESS_TOKEN ||
+  process.env.PAGE_ACCESS_TOKEN ||
+  "";
 
-const MARIAM_PERSONA = `أنتِ "مريم"، مساعدة خدمة العملاء لصفحة "The Viral Creature" في تونس.
-تتحدثين بلهجة تونسية هادئة، واضحة، وطبيعية، وتتعاملين مع كل زبون كسجل متصل لمدة شهر (حتى لو عاد في نفس اللايف، في لايف مسجل لاحقاً، أو في محادثة أخرى).
+const GRAPH_API_VERSION = process.env.FB_GRAPH_VERSION || "v24.0";
 
-1. الأسلوب والترحيب واللباقة:
-- استعملي "مرحبا بك" أو "أهلاً بك" في أول تفاعل فقط عندما لا توجد رسائل أو تعليقات سابقة لهذا الزبون.
-- في باقي التفاعلات، لا تكرري الترحيب عشوائياً؛ استعملي ردوداً طبيعية وبسيطة مثل: ("باهي"، "أوكي"، "تفضّل")، وعند الشكر استعملي ("يعطيك الصحة" / "بلا مزية") فقط في محلها الطبيعي.
-- يُمنع منعاً باتاً قول عبارات مبالغ فيها أو موحية مثل: ("يعطيك الصحة على قرارك") أو أي مديح زائد يوحي بضغط أو تحايل. كوني هادئة وواضحة ومباشرة.
+const redis =
+  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+    ? new Redis({
+        url: process.env.UPSTASH_REDIS_REST_URL,
+        token: process.env.UPSTASH_REDIS_REST_TOKEN,
+      })
+    : null;
 
-2. الصرامة في المخزون وتأكيد الطلب ومنع التخمين:
-- لا يوجد في هذا النظام تأكيد تلقائي للمخزون؛ لذلك لا تقولي أبداً إن منتجاً "متوفر" أو "موجود" أو "سنحضّره" أو "نبعثهولك" ما لم تردكِ معلومة مؤكدة وصريحة بذلك.
-- إذا سأل الزبون عن توفر منتج أو أراد تمرير طلب ("نحب نعدي كوموند") والمخزون غير مؤكد:
-  * وضّحي بوضوح وهدوء أنكِ لا تملكين تأكيداً حالياً لتوفر المنتج في المخزون.
-  * اطلبي منه تحديد الموديل، المقاس، أو اللون بدقة، واطلبي منه أن يثبّت/يرجع يسأل لاحقاً أو يتواصل للتثبّت من توفره قبل إرسال أي بيانات أو اعتماد طلب.
-- إذا كان المنتج غير متوفر حالياً:
-  * قولي بوضوح إنه غير متوفر حالياً، وسجّلي اهتمامه في السجل، وأخبريه أنه ينجم يرجع يسأل لاحقاً أو يتابع معنا ليشوف إذا توفر جديد.
-- لا تطلبي أو تكشفي معلومات شخصية (الاسم، العنوان، رقم الهاتف) في التعليقات العامة، ولا تطلبيها كأن الطلب مضمون ومؤكد والمخزون غير مثبت.
-
-3. الذاكرة والسياق والرد على التعليقات والرسائل:
-- اعتمدي على كامل سجل التفاعل المحفوظ لهذا الزبون (تعليقات البث المباشر أو المنشورات + رسائل Messenger) لمدة 30 يوماً.
-- إذا عاد الزبون ليسأل عن شيء سأل عنه سابقاً أو عن اهتمامه أو عاد في نفس اللايف أو في لايف مسجل، استحضري ما سبق ذكره بدقة واربطيه بسؤاله الحالي، ويمكن عرض بدائل أو منتجات أخرى مناسبة لاهتمامه دون اختلاق أسعار أو توفر أو مواعيد توصيل.
-- في تعليقات اللايف/المنشورات: أجيبي تحت التعليق مباشرة لكل تعليق (سؤال عن منتج أو مخزون، اهتمام مؤجل، شكر، ذم، أو كلام خارج الموضوع) برد مهني، وافٍ، ومناسب للسياق، مع إمكانية استعمال إيموجي خفيف ومناسب.
-- تجنبي عبارة "تَو نثبّتلك في النقطة هاذي ونرجعلك" كوعد بمتابعة تلقائية غير مضمونة.
-
-4. اللهجة التونسية:
-- استعملي حرف النون للمتكلم في المضارع: (نعاونك، نثبّتلك، نشوفلك، نرجعلك). لا تقولي (أساعدك، أقولك، أبعتلك).
-- استعملي: (في تونس، التوصيل، صباط، تصويرة، في الصفحة، شنوّة، تنجم، يعطيك الصحة).
-- لا تقولي: (المغرب، الدليفرزي، عشان، عيوني، حذاء، بالصفحة، أبشر، يا هلا فيك، إيه).
-- إذا كتب الزبون بالفرنسية أو الإنجليزية، ردي بنفس لغته باختصار ولباقة.`;
-
-const memoryFallback = new Map<string, ChatTurn[]>();
-const dedupFallback = new Map<string, number>();
-
-function hasRedisConfig(): boolean {
-  return Boolean(
-    process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
-  );
+async function isDuplicateEvent(key: string): Promise<boolean> {
+  if (!redis) return false;
+  try {
+    const existing = await redis.get(key);
+    if (existing) return true;
+    await redis.set(key, "1", { ex: 600 });
+    return false;
+  } catch (err) {
+    console.error("[webhook] redis dedupe err:", err);
+    return false;
+  }
 }
 
-async function redisCommand(command: (string | number)[]) {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) {
-    return null;
+async function sendCommentReply(commentId: string, message: string) {
+  if (!PAGE_ACCESS_TOKEN) {
+    console.error("[webhook] missing FB_PAGE_ACCESS_TOKEN");
+    return;
   }
+
+  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${encodeURIComponent(
+    commentId
+  )}/comments?access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`;
 
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      signal: AbortSignal.timeout(4000),
-      body: JSON.stringify(command),
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      console.log(
-        JSON.stringify({ ev: "redis_err", status: res.status, body: errText })
-      );
-      return null;
-    }
-
-    const data: any = await res.json();
-    return data?.result ?? null;
-  } catch (err: any) {
-    console.log(
-      JSON.stringify({ ev: "redis_timeout", err: err?.message || "Error" })
-    );
-    return null;
-  }
-}
-
-async function isDuplicateEvent(key?: string): Promise<boolean> {
-  if (!key) return false;
-  const dedupKey = `livefatt:dedup:${key}`;
-
-  if (hasRedisConfig()) {
-    const setResult = await redisCommand(["SET", dedupKey, "1", "NX", "EX", 600]);
-    if (setResult === "OK") {
-      return false;
-    }
-    if (setResult === null) {
-      const now = Date.now();
-      const prev = dedupFallback.get(dedupKey);
-      if (prev && now - prev < 10 * 60 * 1000) return true;
-      dedupFallback.set(dedupKey, now);
-      return false;
-    }
-    return true;
-  }
-
-  const now = Date.now();
-  const prev = dedupFallback.get(dedupKey);
-  if (prev && now - prev < 10 * 60 * 1000) return true;
-  dedupFallback.set(dedupKey, now);
-  return false;
-}
-
-function cleanModel(raw?: string): string {
-  if (!raw) return "";
-  return raw.replace(/^models\//i, "").trim();
-}
-
-function verifySignature(rawBody: string, sigHeader: string | null): boolean {
-  const secret = process.env.FB_APP_SECRET;
-  if (!secret) {
-    return true;
-  }
-  if (!sigHeader || !sigHeader.startsWith("sha256=")) {
-    return false;
-  }
-  const expected =
-    "sha256=" + crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
-  const a = Buffer.from(sigHeader);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
-}
-
-async function getCustomerHistory(personId: string): Promise<ChatTurn[]> {
-  const historyKey = `livefatt:history:30d:${personId}`;
-
-  if (hasRedisConfig()) {
-    const raw = await redisCommand(["GET", historyKey]);
-    if (typeof raw === "string" && raw.length > 0) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          return parsed;
-        }
-      } catch (e) {
-        console.error("DEBUG: Failed parsing Redis history:", e);
-      }
-    }
-    if (Array.isArray(raw)) {
-      return raw;
-    }
-  }
-
-  return memoryFallback.get(personId) || [];
-}
-
-async function appendCustomerTurns(personId: string, turnsToAdd: ChatTurn[]) {
-  if (turnsToAdd.length === 0) return;
-  const historyKey = `livefatt:history:30d:${personId}`;
-  const existing = await getCustomerHistory(personId);
-  const updated = [...existing, ...turnsToAdd].slice(-50);
-
-  memoryFallback.set(personId, updated);
-
-  if (hasRedisConfig()) {
-    await redisCommand([
-      "SET",
-      historyKey,
-      JSON.stringify(updated),
-      "EX",
-      THIRTY_DAYS_SECONDS,
-    ]);
-  }
-}
-
-function hasForbiddenHallucination(text: string): boolean {
-  const forbiddenPatterns = [
-    /المغرب/i,
-    /مغربي/i,
-    /الدليفرزي/i,
-    /عشان/i,
-    /أقولك/i,
-    /أبعتلك/i,
-    /عيوني/i,
-    /حذاء/i,
-    /يعطيك الصحة على قرارك/i,
-  ];
-  return forbiddenPatterns.some((re) => re.test(text));
-}
-
-async function callGeminiOnce(
-  apiKey: string,
-  model: string,
-  history: ChatTurn[],
-  currentUserText: string,
-  channelContext: string,
-  timeoutMs = 5000
-) {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    model
-  )}:generateContent?key=${encodeURIComponent(apiKey)}`;
-
-  const isFirstTurn = history.length === 0;
-  const historyText = isFirstTurn
-    ? "لا توجد تفاعلات سابقة مسجلة لهذا الزبون خلال آخر 30 يوماً."
-    : history
-        .map((t) => `${t.role === "user" ? "الزبون" : "مريم"}: ${t.text}`)
-        .join("\n");
-
-  const prompt = `${MARIAM_PERSONA}
-
-القناة الحالية: ${channelContext}
-حالة السجل: ${isFirstTurn ? "أول تفاعل مسجل لهذا الزبون" : "تفاعل متصل مع سجل سابق محفوظ لمدة 30 يوماً"}
-سجل التفاعل السابق مع الزبون:
-${historyText}
-
-الرسالة أو التعليق الحالي من الزبون:
-${currentUserText}
-
-رد مريم:`;
-
-  const t0 = Date.now();
-
-  try {
-    const res = await fetch(endpoint, {
-      method: "POST",
       headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(timeoutMs),
-      body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: prompt }],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.15,
-          maxOutputTokens: 220,
-        },
-      }),
+      body: JSON.stringify({ message }),
     });
-
-    const textBody = await res.text();
-    console.log(
-      JSON.stringify({ ev: "gemini", model, status: res.status, ms: Date.now() - t0 })
-    );
-    return { ok: res.ok, status: res.status, textBody };
-  } catch (err: any) {
-    console.log(
-      JSON.stringify({ ev: "gemini", model, err: err?.name || "Error", ms: Date.now() - t0 })
-    );
-    return { ok: false, status: 504, textBody: err?.message || "Timeout" };
+    const text = await res.text();
+    console.log("[webhook] Graph API comment reply:", {
+      commentId,
+      status: res.status,
+      ok: res.ok,
+      body: text,
+    });
+  } catch (err) {
+    console.error("[webhook] sendCommentReply network err:", err);
   }
 }
 
-async function generateMariamReply(
-  personId: string,
-  userText: string,
-  channelContext: string
-): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  const history = await getCustomerHistory(personId);
-  const hasPriorTurns = history.length > 0;
-
-  if (!apiKey) {
-    console.error("DEBUG: GEMINI_API_KEY is missing");
-    return hasPriorTurns
-      ? "ما عنديش تأكيد للمعلومة توا؛ قلّي شنوة تحب تعرف بالضبط."
-      : "مرحبا بك! قلّي شنوة تحب تعرف بالضبط.";
+function buildCalmReply(commentText: string): string {
+  const clean = (commentText || "").trim();
+  if (!clean) {
+    return "أهلاً بك. تفضل باكتب سؤالك بوضوح هنا أو ابعثلنا على الميسنجر باش نعاونوك.";
   }
-
-  const configured = cleanModel(process.env.GEMINI_MODEL);
-  const fallbackModel = cleanModel(process.env.GEMINI_FALLBACK_MODEL);
-  const candidates = Array.from(
-    new Set(
-      [
-        "gemini-3.5-flash-lite",
-        configured,
-        fallbackModel,
-        "gemini-3.8-flash-lite",
-      ].filter(Boolean)
-    )
-  ).slice(0, 3);
-
-  for (const model of candidates) {
-    const attempt = await callGeminiOnce(
-      apiKey,
-      model,
-      history,
-      userText,
-      channelContext,
-      5000
-    );
-    if (attempt.ok) {
-      try {
-        const data: any = JSON.parse(attempt.textBody);
-        const replyText =
-          data?.candidates?.[0]?.content?.parts
-            ?.map((p: any) => p?.text ?? "")
-            .join("")
-            .trim() || "";
-
-        if (replyText && !hasForbiddenHallucination(replyText)) {
-          await appendCustomerTurns(personId, [
-            { role: "user", text: userText },
-            { role: "assistant", text: replyText },
-          ]);
-          return replyText;
-        }
-        if (replyText && hasForbiddenHallucination(replyText)) {
-          console.log(
-            JSON.stringify({ ev: "blocked_hallucination", model, replyText })
-          );
-        }
-      } catch (e) {
-        console.error("DEBUG: Failed parsing Gemini JSON:", e);
-      }
-    }
-  }
-
-  await appendCustomerTurns(personId, [{ role: "user", text: userText }]);
-  return hasPriorTurns
-    ? "ما عنديش تأكيد للمعلومة توا؛ قلّي شنوة الموديل ولا السؤال اللي تقصدو وارجع اسألنا باش نتثبّتولك."
-    : "مرحبا بك! قلّي شنوة المنتج ولا السؤال اللي تحب تعرف عليه.";
-}
-
-async function sendMessage(recipientId: string, text: string) {
-  const token = process.env.FB_PAGE_ACCESS_TOKEN;
-  if (!token) {
-    console.error("DEBUG: FB_PAGE_ACCESS_TOKEN is missing");
-    return;
-  }
-
-  const res = await fetch(
-    `https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(token)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(5000),
-      body: JSON.stringify({
-        recipient: { id: recipientId },
-        message: { text },
-      }),
-    }
-  );
-
-  const data = await res.text();
-  console.log("DEBUG: Graph API send status:", res.status, "response:", data);
-}
-
-async function sendCommentReply(commentId: string, message: string) {
-  const token = process.env.FB_PAGE_ACCESS_TOKEN;
-  if (!token) {
-    console.error("DEBUG: FB_PAGE_ACCESS_TOKEN is missing for comment reply");
-    return;
-  }
-
-  try {
-    const res = await fetch(
-      `https://graph.facebook.com/v21.0/${encodeURIComponent(
-        commentId
-      )}/comments?access_token=${encodeURIComponent(token)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(5000),
-        body: JSON.stringify({ message }),
-      }
-    );
-
-    const data = await res.text();
-    console.log("DEBUG: Graph API comment reply status:", res.status, "response:", data);
-  } catch (err: any) {
-    console.log(
-      JSON.stringify({ ev: "comment_reply_err", commentId, err: err?.message || "Error" })
-    );
-  }
+  return "أهلاً بك. بالنسبة للمعلومة أو التوفر أو الطلب، نثبتولك المعطيات الدقيقة قبل أي تأكيد. إذا تحب تبعث تفاصيل أكثر أو تطلب، تفضل على الميسنجر ونجاوبوك بوضوح.";
 }
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const mode = searchParams.get("hub.mode");
-  const token = searchParams.get("hub.verify_token");
-  const challenge = searchParams.get("hub.challenge");
+  const mode = req.nextUrl.searchParams.get("hub.mode");
+  const token = req.nextUrl.searchParams.get("hub.verify_token");
+  const challenge = req.nextUrl.searchParams.get("hub.challenge");
 
-  if (mode === "subscribe" && token && token === process.env.FB_VERIFY_TOKEN) {
-    return new NextResponse(challenge ?? "", { status: 200 });
+  if (mode === "subscribe" && token === VERIFY_TOKEN && challenge) {
+    return new NextResponse(challenge, {
+      status: 200,
+      headers: { "Content-Type": "text/plain" },
+    });
   }
-  return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  return NextResponse.json({ error: "Verification failed" }, { status: 403 });
 }
 
 export async function POST(req: NextRequest) {
-  const rawBody = await req.text();
-  const sigHeader = req.headers.get("x-hub-signature-256");
-
-  if (!verifySignature(rawBody, sigHeader)) {
-    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-  }
-
-  let body: any;
+  let rawBody = "";
   try {
-    body = JSON.parse(rawBody);
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
+    rawBody = await req.text();
+    const body = JSON.parse(rawBody);
 
-  if (body?.object === "page" && Array.isArray(body?.entry)) {
+    console.log("[webhook] POST received:", {
+      object: body?.object,
+      entryCount: Array.isArray(body?.entry) ? body.entry.length : 0,
+    });
+
+    if (body?.object !== "page" || !Array.isArray(body?.entry)) {
+      return NextResponse.json({ status: "ignored_non_page" }, { status: 200 });
+    }
+
     for (const entry of body.entry) {
       const pageId = entry?.id ? String(entry.id) : "";
-      const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
 
-      for (const ev of messaging) {
-        if (ev?.message?.is_echo) {
-          continue;
-        }
-        const mid = typeof ev?.message?.mid === "string" ? ev.message.mid : undefined;
-        if (await isDuplicateEvent(mid ? `msg_${mid}` : undefined)) {
-          continue;
-        }
+      if (Array.isArray(entry?.changes)) {
+        for (const ch of entry.changes) {
+          const field = ch?.field;
+          const val = ch?.value || {};
+          console.log("[webhook] change entry:", {
+            pageId,
+            field,
+            item: val?.item,
+            verb: val?.verb,
+            commentId: val?.comment_id,
+            fromId: val?.from?.id,
+            fromName: val?.from?.name,
+            message: val?.message,
+          });
 
-        const senderId = ev?.sender?.id;
-        const text = ev?.message?.text;
+          if (field === "feed" && val?.item === "comment") {
+            const verb = val?.verb || "add";
+            const commentId = val?.comment_id ? String(val.comment_id) : "";
+            const commenterId = val?.from?.id ? String(val.from?.id) : "";
+            const messageText = typeof val?.message === "string" ? val.message : "";
 
-        if (senderId && typeof text === "string" && text.trim().length > 0) {
-          const reply = await generateMariamReply(
-            String(senderId),
-            text.trim(),
-            "رسالة خاصة على Messenger"
-          );
-          await sendMessage(String(senderId), reply);
-        }
-      }
+            if (verb !== "add") {
+              console.log("[webhook] skip comment verb:", verb);
+              continue;
+            }
 
-      const changes = Array.isArray(entry?.changes) ? entry.changes : [];
-      for (const ch of changes) {
-        if (ch?.field !== "feed") {
-          continue;
-        }
-        const val = ch?.value;
-        if (!val || val?.item !== "comment" || val?.verb !== "add") {
-          continue;
-        }
+            if (!commentId) {
+              console.log("[webhook] missing comment_id");
+              continue;
+            }
 
-        const commenterId = val?.from?.id ? String(val.from.id) : "";
-        const commentId = val?.comment_id ? String(val.comment_id) : "";
-        const commentText = typeof val?.message === "string" ? val.message.trim() : "";
+            if (pageId && commenterId === pageId) {
+              console.log("[webhook] comment made by page itself, skipping");
+              continue;
+            }
 
-        if (!commenterId || !commentId || !commentText) {
-          continue;
-        }
-        if (pageId && commenterId === pageId) {
-          continue;
-        }
+            const dedupeKey = `feed_comment_${commentId}`;
+            if (await isDuplicateEvent(dedupeKey)) {
+              console.log("[webhook] duplicate comment skipped:", commentId);
+              continue;
+            }
 
-        if (await isDuplicateEvent(`feed_comment_${commentId}`)) {
-          continue;
+            const replyText = buildCalmReply(messageText);
+            await sendCommentReply(commentId, replyText);
+          }
         }
-
-        const reply = await generateMariamReply(
-          commenterId,
-          `[تعليق على بث مباشر / منشور]: ${commentText}`,
-          "تعليق مباشر على البث المباشر أو المنشور (الرد يظهر تحت التعليق)"
-        );
-        await sendCommentReply(commentId, reply);
       }
     }
-  }
 
-  return NextResponse.json({ received: true }, { status: 200 });
+    return NextResponse.json({ status: "ok" }, { status: 200 });
+  } catch (err) {
+    console.error("[webhook] POST error:", err, "rawLen:", rawBody.length);
+    return NextResponse.json({ status: "error_handled" }, { status: 200 });
+  }
 }
