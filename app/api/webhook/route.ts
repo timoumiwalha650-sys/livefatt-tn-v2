@@ -9,20 +9,23 @@ type ChatTurn = {
 };
 
 const MARIAM_PERSONA = `أنتِ "مريم"، مساعدة خدمة العملاء لصفحة "The Viral Creature" في تونس.
-تتحدثين بلهجة تونسية مهنية، واضحة، وطبيعية، وتتعاملين مع كل محادثة كسلسلة متصلة.
+تتحدثين بلهجة تونسية مهنية، واضحة، وطبيعية، وتتعاملين مع كل محادثة كسلسلة متصلة لنفس الزبون.
 
 1. الترحيب واللباقة:
 - استعملي "مرحبا بك" أو "أهلاً بك" في بداية المحادثة فقط عندما لا توجد رسائل سابقة.
 - في باقي المحادثة، لا تكرري الترحيب عشوائياً في كل رد؛ رحّبي أو أظهري لباقة فقط عند الشكر ("يعطيك الصحة" / "بلا مزية") أو عند ذكر الاسم ("تشرفنا بك [الاسم]") أو عند إتمام معطيات واضحة.
 
-2. الارتباط بالسؤال والرد السابق:
-- أجيبي مباشرة على آخر سؤال أو معلومة أضافها الزبون مع البناء على الرسائل والردود السابقة في نفس المحادثة.
-- لا تعيدي شرح ما تم قوله سابقاً ولا تجيبي بإجابة لا تنطبق على السؤال.
-- لا تخترعي أسعاراً، مواعيد توصيل، أو توفراً غير مؤكد؛ إذا لم تكن المعلومة مؤكدة، وضّحي أنكِ ستثبّتينها وتُعلمينه.
+2. الذاكرة والسؤال والرد السابق:
+- اعتمدي على كامل سجل المحادثة المتاح مع هذا الزبون (سواء في الرسائل أو التعليقات المرتبطة بنفس الحساب).
+- إذا سأل الزبون عن سؤال سابق أو عن اهتمامه السابق ("تتفك شنوة سألتك"، "ثبتلي"، "سألتك قبل على منتج"):
+  * راجعي السجل بدقة؛ إذا وُجد في السجل فاذكريه بوضوح.
+  * إذا لم يكن موجوداً في السجل، قولي بصراحة ووضوح إنه لم يُذكر في المحادثة بعد، واطلبي منه التوضيح مباشرة.
+- تجنبي استعمال عبارة "تَو نثبّتلك في النقطة هاذي ونرجعلك" كجملة مبهمة لا يتبعها رد لاحق تلقائي؛ إذا كانت المعلومة غير متوفرة أو غير مؤكدة، وضّحي ذلك مباشرة وبساطة وقدّمي خطوة واضحة للزبون (مثل طلب اسم الموديل، المقاس، اللون، أو الصورة).
+- لا تخترعي أسعاراً، مواعيد توصيل، أو توفراً غير مؤكد.
 
 3. اللهجة التونسية:
 - استعملي حرف النون للمتكلم في المضارع: (نعاونك، نثبّتلك، نشوفلك، نرجعلك). لا تقولي (أساعدك، أقولك، أبعتلك).
-- استعملي: (في تونس، التوصيل، صباط، في الصفحة، شنوّة، تنجم، يعطيك الصحة).
+- استعملي: (في تونس، التوصيل، صباط، تصويرة، في الصفحة، شنوّة، تنجم، يعطيك الصحة).
 - لا تقولي: (المغرب، الدليفرزي، عشان، عيوني، حذاء، بالصفحة، أبشر، يا هلا فيك، إيه).
 - إذا كتب الزبون بالفرنسية أو الإنجليزية، ردي بنفس لغته باختصار ولباقة.`;
 
@@ -71,7 +74,7 @@ function getHistory(senderId: string): ChatTurn[] {
 
 function saveTurn(senderId: string, turn: ChatTurn) {
   const current = sessionHistory.get(senderId) || [];
-  sessionHistory.set(senderId, [...current, turn].slice(-12));
+  sessionHistory.set(senderId, [...current, turn].slice(-30));
 }
 
 function hasForbiddenHallucination(text: string): boolean {
@@ -101,15 +104,15 @@ async function callGeminiOnce(
 
   const isFirstTurn = history.length === 0;
   const historyText = isFirstTurn
-    ? "لا توجد رسائل سابقة (هذه أول رسالة في المحادثة)."
+    ? "لا توجد رسائل سابقة في السجل الحالي (هذه أول رسالة مسجلة لهذا الزبون)."
     : history
         .map((t) => `${t.role === "user" ? "الزبون" : "مريم"}: ${t.text}`)
         .join("\n");
 
   const prompt = `${MARIAM_PERSONA}
 
-حالة المحادثة: ${isFirstTurn ? "بداية المحادثة (أول رسالة)" : "محادثة مستمرة (تجنبي تكرار الترحيب العشوائي)"}
-المحادثة السابقة:
+حالة المحادثة: ${isFirstTurn ? "بداية المحادثة المسجلة" : "محادثة مستمرة مع نفس الزبون (تجنبي تكرار الترحيب العشوائي)"}
+سجل المحادثة المتاح:
 ${historyText}
 
 الرسالة الحالية من الزبون:
@@ -133,7 +136,7 @@ ${currentUserText}
         ],
         generationConfig: {
           temperature: 0.15,
-          maxOutputTokens: 180,
+          maxOutputTokens: 200,
         },
       }),
     });
@@ -159,8 +162,8 @@ async function generateMariamReply(senderId: string, userText: string): Promise<
   if (!apiKey) {
     console.error("DEBUG: GEMINI_API_KEY is missing");
     return hasPriorTurns
-      ? "تَو نثبّتلك ونرجعلك في أقرب وقت."
-      : "مرحبا بك! وصلتنا رسالتك وتَو نرجعولك في أقرب وقت.";
+      ? "ما نجمتش نثبّت المعلومة توا؛ قلّي شنوة تحب تعرف بالضبط."
+      : "مرحبا بك! وصلتنا رسالتك، قلّي شنوة تحب تعرف بالضبط.";
   }
 
   const configured = cleanModel(process.env.GEMINI_MODEL);
@@ -195,11 +198,10 @@ async function generateMariamReply(senderId: string, userText: string): Promise<
     }
   }
 
-  // نحفظ رسالة الزبون فقط دون حشو الذاكرة بنص احتياطي مكرر
   saveTurn(senderId, { role: "user", text: userText });
   return hasPriorTurns
-    ? "تَو نثبّتلك في النقطة هاذي ونرجعلك."
-    : "مرحبا بك! تَو نثبّتلك في سؤالك ونرجعلك.";
+    ? "ما ظهرتليش المعلومة الكاملة توا؛ قلّي شنوة المنتج ولا السؤال اللي تقصدو."
+    : "مرحبا بك! قلّي شنوة المنتج ولا السؤال اللي تحب تعرف عليه.";
 }
 
 async function sendMessage(recipientId: string, text: string) {
@@ -224,6 +226,35 @@ async function sendMessage(recipientId: string, text: string) {
 
   const data = await res.text();
   console.log("DEBUG: Graph API send status:", res.status, "response:", data);
+}
+
+async function sendCommentReply(commentId: string, message: string) {
+  const token = process.env.FB_PAGE_ACCESS_TOKEN;
+  if (!token) {
+    console.error("DEBUG: FB_PAGE_ACCESS_TOKEN is missing for comment reply");
+    return;
+  }
+
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/v21.0/${encodeURIComponent(
+        commentId
+      )}/comments?access_token=${encodeURIComponent(token)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(5000),
+        body: JSON.stringify({ message }),
+      }
+    );
+
+    const data = await res.text();
+    console.log("DEBUG: Graph API comment reply status:", res.status, "response:", data);
+  } catch (err: any) {
+    console.log(
+      JSON.stringify({ ev: "comment_reply_err", commentId, err: err?.message || "Error" })
+    );
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -255,6 +286,7 @@ export async function POST(req: NextRequest) {
 
   if (body?.object === "page" && Array.isArray(body?.entry)) {
     for (const entry of body.entry) {
+      const pageId = entry?.id ? String(entry.id) : "";
       const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
 
       for (const ev of messaging) {
@@ -273,6 +305,39 @@ export async function POST(req: NextRequest) {
           const reply = await generateMariamReply(String(senderId), text.trim());
           await sendMessage(String(senderId), reply);
         }
+      }
+
+      const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+      for (const ch of changes) {
+        if (ch?.field !== "feed") {
+          continue;
+        }
+        const val = ch?.value;
+        if (!val || val?.item !== "comment" || val?.verb !== "add") {
+          continue;
+        }
+
+        const commenterId = val?.from?.id ? String(val.from.id) : "";
+        const commentId = val?.comment_id ? String(val.comment_id) : "";
+        const commentText = typeof val?.message === "string" ? val.message.trim() : "";
+
+        if (!commenterId || !commentId || !commentText) {
+          continue;
+        }
+        if (pageId && commenterId === pageId) {
+          continue;
+        }
+
+        const dedupKey = `feed_comment_${commentId}`;
+        if (isDuplicateMessage(dedupKey)) {
+          continue;
+        }
+
+        const reply = await generateMariamReply(
+          commenterId,
+          `[تعليق على منشور/بث مباشر]: ${commentText}`
+        );
+        await sendCommentReply(commentId, reply);
       }
     }
   }
