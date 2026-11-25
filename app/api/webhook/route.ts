@@ -8,19 +8,24 @@ type ChatTurn = {
   text: string;
 };
 
+const THIRTY_DAYS_SECONDS = 30 * 24 * 60 * 60; // 2592000 ثانية = شهر كامل
+
 const MARIAM_PERSONA = `أنتِ "مريم"، مساعدة خدمة العملاء لصفحة "The Viral Creature" في تونس.
-تتحدثين بلهجة تونسية مهنية، واضحة، وطبيعية، وتتعاملين مع كل محادثة كسلسلة متصلة لنفس الزبون.
+تتحدثين بلهجة تونسية مهنية، واضحة، وطبيعية، وتتعاملين مع كل زبون كسجل متصل لمدة شهر (حتى لو عاد في نفس اللايف، في لايف مسجل لاحقاً، أو في محادثة أخرى).
 
 1. الترحيب واللباقة:
-- استعملي "مرحبا بك" أو "أهلاً بك" في بداية المحادثة فقط عندما لا توجد رسائل سابقة.
-- في باقي المحادثة، لا تكرري الترحيب عشوائياً في كل رد؛ رحّبي أو أظهري لباقة فقط عند الشكر ("يعطيك الصحة" / "بلا مزية") أو عند ذكر الاسم ("تشرفنا بك [الاسم]") أو عند إتمام معطيات واضحة.
+- استعملي "مرحبا بك" أو "أهلاً بك" في أول تفاعل فقط عندما لا توجد رسائل أو تعليقات سابقة لهذا الزبون.
+- في باقي التفاعلات، لا تكرري الترحيب عشوائياً؛ رحّبي أو أظهري لباقة فقط عند الشكر ("يعطيك الصحة" / "بلا مزية") أو عند ذكر الاسم ("تشرفنا بك [الاسم]") أو عند إتمام معطيات واضحة.
 
-2. الذاكرة والسؤال والرد السابق:
-- اعتمدي على كامل سجل المحادثة المتاح مع هذا الزبون (سواء في الرسائل أو التعليقات المرتبطة بنفس الحساب).
-- إذا سأل الزبون عن سؤال سابق أو عن اهتمامه السابق ("تتفك شنوة سألتك"، "ثبتلي"، "سألتك قبل على منتج"):
-  * راجعي السجل بدقة؛ إذا وُجد في السجل فاذكريه بوضوح.
-  * إذا لم يكن موجوداً في السجل، قولي بصراحة ووضوح إنه لم يُذكر في المحادثة بعد، واطلبي منه التوضيح مباشرة.
-- تجنبي استعمال عبارة "تَو نثبّتلك في النقطة هاذي ونرجعلك" كجملة مبهمة لا يتبعها رد لاحق تلقائي؛ إذا كانت المعلومة غير متوفرة أو غير مؤكدة، وضّحي ذلك مباشرة وبساطة وقدّمي خطوة واضحة للزبون (مثل طلب اسم الموديل، المقاس، اللون، أو الصورة).
+2. الذاكرة والسياق والرد على التعليقات والرسائل:
+- اعتمدي على كامل سجل التفاعل المحفوظ لهذا الزبون (تعليقات البث المباشر أو المنشورات + رسائل Messenger).
+- إذا عاد الزبون ليسأل عن شيء سأل عنه سابقاً أو عن اهتمامه أو مخزون منتج أو عاد بعد فترة في نفس اللايف أو في لايف مسجل:
+  * استحضري ما سبق ذكره في السجل بدقة، واربطيه بسؤاله الحالي بذكاء ولباقة (ويمكن عرض بدائل أو منتجات مناسبة لاهتمامه دون اختلاق معلومات).
+  * إذا لم يكن هناك سجل سابق أو لم يُذكر المنتج في السجل بعد، وضّحي ذلك ببساطة واطلبي التوضيح مباشرة.
+- في تعليقات اللايف/المنشورات:
+  * أجيبي تحت التعليق مباشرة لكل تعليق (سؤال عن منتج أو مخزون، اهتمام مؤجل، شكر، ذم، أو كلام خارج الموضوع) برد مهني، وافٍ، ومناسب للسياق، مع إمكانية استعمال إيموجي خفيف ومناسب.
+  * لا تطلبي أو تكشفي معلومات شخصية (الاسم، العنوان، رقم الهاتف) في التعليقات العامة؛ وعندما يبدي الزبون جدية في الشراء أو يسأل بجدية عن منتج لإتمام الطلب، وجّهيه لإتمام تأكيد الطلب عبر Messenger بوضع الاسم والعنوان ورقم الهاتف.
+- تجنبي استعمال عبارة "تَو نثبّتلك في النقطة هاذي ونرجعلك" كجملة مبهمة لا يتبعها رد لاحق تلقائي؛ إذا كانت المعلومة غير مؤكدة أو غير متوفرة حالياً، وضّحي ذلك بوضوح وقدّمي خطوة عملية واضحة (مثل تحديد الموديل، المقاس، اللون، أو التصويرة).
 - لا تخترعي أسعاراً، مواعيد توصيل، أو توفراً غير مؤكد.
 
 3. اللهجة التونسية:
@@ -29,21 +34,75 @@ const MARIAM_PERSONA = `أنتِ "مريم"، مساعدة خدمة العملا
 - لا تقولي: (المغرب، الدليفرزي، عشان، عيوني، حذاء، بالصفحة، أبشر، يا هلا فيك، إيه).
 - إذا كتب الزبون بالفرنسية أو الإنجليزية، ردي بنفس لغته باختصار ولباقة.`;
 
-const processedMessageIds = new Map<string, number>();
-const sessionHistory = new Map<string, ChatTurn[]>();
+const memoryFallback = new Map<string, ChatTurn[]>();
+const dedupFallback = new Map<string, number>();
 
-function isDuplicateMessage(mid?: string): boolean {
-  if (!mid) return false;
-  const now = Date.now();
-  for (const [key, ts] of processedMessageIds.entries()) {
-    if (now - ts > 10 * 60 * 1000) {
-      processedMessageIds.delete(key);
-    }
+function hasRedisConfig(): boolean {
+  return Boolean(
+    process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+  );
+}
+
+async function redisCommand(command: (string | number)[]) {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) {
+    return null;
   }
-  if (processedMessageIds.has(mid)) {
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      signal: AbortSignal.timeout(4000),
+      body: JSON.stringify(command),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.log(
+        JSON.stringify({ ev: "redis_err", status: res.status, body: errText })
+      );
+      return null;
+    }
+
+    const data: any = await res.json();
+    return data?.result ?? null;
+  } catch (err: any) {
+    console.log(
+      JSON.stringify({ ev: "redis_timeout", err: err?.message || "Error" })
+    );
+    return null;
+  }
+}
+
+async function isDuplicateEvent(key?: string): Promise<boolean> {
+  if (!key) return false;
+  const dedupKey = `livefatt:dedup:${key}`;
+
+  if (hasRedisConfig()) {
+    const setResult = await redisCommand(["SET", dedupKey, "1", "NX", "EX", 600]);
+    if (setResult === "OK") {
+      return false;
+    }
+    if (setResult === null) {
+      // في حال تعذر الوصول إلى Redis مؤقتاً نستخدم ذاكرة احتياطية محلية لنفس الدالة
+      const now = Date.now();
+      const prev = dedupFallback.get(dedupKey);
+      if (prev && now - prev < 10 * 60 * 1000) return true;
+      dedupFallback.set(dedupKey, now);
+      return false;
+    }
     return true;
   }
-  processedMessageIds.set(mid, now);
+
+  const now = Date.now();
+  const prev = dedupFallback.get(dedupKey);
+  if (prev && now - prev < 10 * 60 * 1000) return true;
+  dedupFallback.set(dedupKey, now);
   return false;
 }
 
@@ -68,13 +127,46 @@ function verifySignature(rawBody: string, sigHeader: string | null): boolean {
   return crypto.timingSafeEqual(a, b);
 }
 
-function getHistory(senderId: string): ChatTurn[] {
-  return sessionHistory.get(senderId) || [];
+async function getCustomerHistory(personId: string): Promise<ChatTurn[]> {
+  const historyKey = `livefatt:history:30d:${personId}`;
+
+  if (hasRedisConfig()) {
+    const raw = await redisCommand(["GET", historyKey]);
+    if (typeof raw === "string" && raw.length > 0) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+      } catch (e) {
+        console.error("DEBUG: Failed parsing Redis history:", e);
+      }
+    }
+    if (Array.isArray(raw)) {
+      return raw;
+    }
+  }
+
+  return memoryFallback.get(personId) || [];
 }
 
-function saveTurn(senderId: string, turn: ChatTurn) {
-  const current = sessionHistory.get(senderId) || [];
-  sessionHistory.set(senderId, [...current, turn].slice(-30));
+async function appendCustomerTurns(personId: string, turnsToAdd: ChatTurn[]) {
+  if (turnsToAdd.length === 0) return;
+  const historyKey = `livefatt:history:30d:${personId}`;
+  const existing = await getCustomerHistory(personId);
+  const updated = [...existing, ...turnsToAdd].slice(-50);
+
+  memoryFallback.set(personId, updated);
+
+  if (hasRedisConfig()) {
+    await redisCommand([
+      "SET",
+      historyKey,
+      JSON.stringify(updated),
+      "EX",
+      THIRTY_DAYS_SECONDS,
+    ]);
+  }
 }
 
 function hasForbiddenHallucination(text: string): boolean {
@@ -96,6 +188,7 @@ async function callGeminiOnce(
   model: string,
   history: ChatTurn[],
   currentUserText: string,
+  channelContext: string,
   timeoutMs = 5000
 ) {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
@@ -104,18 +197,19 @@ async function callGeminiOnce(
 
   const isFirstTurn = history.length === 0;
   const historyText = isFirstTurn
-    ? "لا توجد رسائل سابقة في السجل الحالي (هذه أول رسالة مسجلة لهذا الزبون)."
+    ? "لا توجد تفاعلات سابقة مسجلة لهذا الزبون خلال آخر 30 يوماً."
     : history
         .map((t) => `${t.role === "user" ? "الزبون" : "مريم"}: ${t.text}`)
         .join("\n");
 
   const prompt = `${MARIAM_PERSONA}
 
-حالة المحادثة: ${isFirstTurn ? "بداية المحادثة المسجلة" : "محادثة مستمرة مع نفس الزبون (تجنبي تكرار الترحيب العشوائي)"}
-سجل المحادثة المتاح:
+القناة الحالية: ${channelContext}
+حالة السجل: ${isFirstTurn ? "أول تفاعل مسجل لهذا الزبون" : "تفاعل متصل مع سجل سابق محفوظ لمدة 30 يوماً"}
+سجل التفاعل السابق مع الزبون:
 ${historyText}
 
-الرسالة الحالية من الزبون:
+الرسالة أو التعليق الحالي من الزبون:
 ${currentUserText}
 
 رد مريم:`;
@@ -136,7 +230,7 @@ ${currentUserText}
         ],
         generationConfig: {
           temperature: 0.15,
-          maxOutputTokens: 200,
+          maxOutputTokens: 220,
         },
       }),
     });
@@ -154,9 +248,13 @@ ${currentUserText}
   }
 }
 
-async function generateMariamReply(senderId: string, userText: string): Promise<string> {
+async function generateMariamReply(
+  personId: string,
+  userText: string,
+  channelContext: string
+): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
-  const history = getHistory(senderId);
+  const history = await getCustomerHistory(personId);
   const hasPriorTurns = history.length > 0;
 
   if (!apiKey) {
@@ -167,12 +265,27 @@ async function generateMariamReply(senderId: string, userText: string): Promise<
   }
 
   const configured = cleanModel(process.env.GEMINI_MODEL);
+  const fallbackModel = cleanModel(process.env.GEMINI_FALLBACK_MODEL);
   const candidates = Array.from(
-    new Set(["gemini-3.5-flash-lite", configured, "gemini-3.8-flash-lite"].filter(Boolean))
-  ).slice(0, 2);
+    new Set(
+      [
+        "gemini-3.5-flash-lite",
+        configured,
+        fallbackModel,
+        "gemini-3.8-flash-lite",
+      ].filter(Boolean)
+    )
+  ).slice(0, 3);
 
   for (const model of candidates) {
-    const attempt = await callGeminiOnce(apiKey, model, history, userText, 5000);
+    const attempt = await callGeminiOnce(
+      apiKey,
+      model,
+      history,
+      userText,
+      channelContext,
+      5000
+    );
     if (attempt.ok) {
       try {
         const data: any = JSON.parse(attempt.textBody);
@@ -183,8 +296,10 @@ async function generateMariamReply(senderId: string, userText: string): Promise<
             .trim() || "";
 
         if (replyText && !hasForbiddenHallucination(replyText)) {
-          saveTurn(senderId, { role: "user", text: userText });
-          saveTurn(senderId, { role: "assistant", text: replyText });
+          await appendCustomerTurns(personId, [
+            { role: "user", text: userText },
+            { role: "assistant", text: replyText },
+          ]);
           return replyText;
         }
         if (replyText && hasForbiddenHallucination(replyText)) {
@@ -198,7 +313,7 @@ async function generateMariamReply(senderId: string, userText: string): Promise<
     }
   }
 
-  saveTurn(senderId, { role: "user", text: userText });
+  await appendCustomerTurns(personId, [{ role: "user", text: userText }]);
   return hasPriorTurns
     ? "ما ظهرتليش المعلومة الكاملة توا؛ قلّي شنوة المنتج ولا السؤال اللي تقصدو."
     : "مرحبا بك! قلّي شنوة المنتج ولا السؤال اللي تحب تعرف عليه.";
@@ -294,7 +409,7 @@ export async function POST(req: NextRequest) {
           continue;
         }
         const mid = typeof ev?.message?.mid === "string" ? ev.message.mid : undefined;
-        if (isDuplicateMessage(mid)) {
+        if (await isDuplicateEvent(mid ? `msg_${mid}` : undefined)) {
           continue;
         }
 
@@ -302,7 +417,11 @@ export async function POST(req: NextRequest) {
         const text = ev?.message?.text;
 
         if (senderId && typeof text === "string" && text.trim().length > 0) {
-          const reply = await generateMariamReply(String(senderId), text.trim());
+          const reply = await generateMariamReply(
+            String(senderId),
+            text.trim(),
+            "رسالة خاصة على Messenger"
+          );
           await sendMessage(String(senderId), reply);
         }
       }
@@ -328,14 +447,14 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        const dedupKey = `feed_comment_${commentId}`;
-        if (isDuplicateMessage(dedupKey)) {
+        if (await isDuplicateEvent(`feed_comment_${commentId}`)) {
           continue;
         }
 
         const reply = await generateMariamReply(
           commenterId,
-          `[تعليق على منشور/بث مباشر]: ${commentText}`
+          `[تعليق على بث مباشر / منشور]: ${commentText}`,
+          "تعليق مباشر على البث المباشر أو المنشور (الرد يظهر تحت التعليق)"
         );
         await sendCommentReply(commentId, reply);
       }
