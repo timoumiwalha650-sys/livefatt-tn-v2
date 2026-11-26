@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const BUILD_TAG = "v2026-11-26-dynamic";
+const BUILD_TAG = "v2026-11-26-clean-reply";
 
 const VERIFY_TOKEN =
   process.env.FB_VERIFY_TOKEN ||
@@ -18,7 +18,7 @@ const PAGE_ACCESS_TOKEN =
 const GRAPH_API_VERSION = process.env.FB_GRAPH_VERSION || "v24.0";
 
 const DEDUPE_TTL_MS = 10 * 60 * 1000;
-const SAME_TEXT_WINDOW_MS = 15 * 1000;
+const RECIPIENT_COOLDOWN_MS = 12 * 1000;
 const seenEvents = new Map<string, number>();
 
 function isDuplicateEvent(key: string, ttlMs: number = DEDUPE_TTL_MS): boolean {
@@ -108,7 +108,10 @@ async function sendCommentReply(commentId: string, message: string) {
   }
 }
 
-function buildDynamicReply(rawText: string, channel: "messenger" | "comment"): string {
+function buildNaturalFallbackReply(
+  rawText: string,
+  channel: "messenger" | "comment"
+): string {
   const clean = (rawText || "").trim();
   const lower = clean.toLowerCase();
 
@@ -118,6 +121,7 @@ function buildDynamicReply(rawText: string, channel: "messenger" | "comment"): s
 
   if (
     lower.includes("salam") ||
+    lower.includes("slam") ||
     lower.includes("selam") ||
     lower.includes("hi") ||
     lower.includes("hello") ||
@@ -137,20 +141,24 @@ function buildDynamicReply(rawText: string, channel: "messenger" | "comment"): s
     clean.includes("موديل") ||
     clean.includes("شنوة عندكم") ||
     clean.includes("شنو عندكم") ||
-    clean.includes("موجود")
+    clean.includes("موجود") ||
+    clean.includes("صباط") ||
+    lower.includes("nike") ||
+    clean.includes("نايك")
   ) {
-    return "بخصوص الجديد والموديلات المتوفرة، نثبتولك آخر القطع الموجودة بدقة قبل أي تأكيد. قولي أي صنف أو موديل تقصد بالضبط باش نجاوبك عليه.";
+    return "نثبتولك توفر القطعة والموديل والمقاسات الموجودة حالياً قبل أي تأكيد. قولي شنوة المقاس أو اللون اللي يهمك بالضبط باش نجاوبك بدقة.";
   }
 
   if (
     clean.includes("سوم") ||
     clean.includes("بقداش") ||
     clean.includes("ثمن") ||
+    clean.includes("سعر") ||
     clean.includes("prix") ||
     clean.includes("توصيل") ||
     clean.includes("livraison")
   ) {
-    return "بخصوص السوم والتوصيل، نثبتولك السعر الدقيق ومعلوم التوصيل حسب الموديل والولاية. أعطيني اسم أو وصف الموديل اللي يهمك.";
+    return "نثبتولك السوم الدقيق ومعلوم التوصيل حسب الموديل والولاية. قولي اسم أو وصف القطعة والولاية باش نعطيك التفاصيل الصحيحة.";
   }
 
   if (
@@ -161,12 +169,12 @@ function buildDynamicReply(rawText: string, channel: "messenger" | "comment"): s
     clean.includes("نحب نطلب")
   ) {
     if (channel === "comment") {
-      return "وصل تعليقك. نثبتولك تفاصيل الطلبية والقطعة بكل وضوح، وقلي شنوة الموديل والمقاس أو اللون اللي تحبو.";
+      return "وصل تعليقك. نثبتولك تفاصيل القطعة والطلبية، وقولي الموديل والمقاس أو اللون اللي تحبو.";
     }
-    return "وصلتنا رسالتك بخصوص الطلبية. قولي شنوة الموديل والمقاس أو اللون اللي تحبو باش نثبتولك التفاصيل قبل التأكيد.";
+    return "وصلتنا رسالتك بخصوص الطلبية. قولي الموديل والمقاس أو اللون اللي تحبو باش نثبتولك التفاصيل قبل التأكيد.";
   }
 
-  return `وصلنا سؤالك ("${clean}"). نثبتولك التفاصيل الصحيحة قبل أي تأكيد—قولي شنوة تحب نوضّحلك فيه أكثر؟`;
+  return "وصلنا سؤالك ونثبتولك التفاصيل الصحيحة قبل أي تأكيد. قولي شنوة تحب نوضّحلك فيه أكثر بالضبط؟";
 }
 
 async function generateMariamReply(
@@ -186,13 +194,13 @@ async function generateMariamReply(
         },
         body: JSON.stringify({
           model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-          temperature: 0.4,
+          temperature: 0.35,
           max_tokens: 180,
           messages: [
             {
               role: "system",
               content:
-                "أنت مريم، مساعدة صفحة The Viral Creature في تونس. تحدثي بلهجة تونسية واضحة، هادئة، صادقة ومباشرة دون مبالغة أو وعود غير مؤكدة. أجيبي مباشرة على السؤال أو التعليق باختصار مفيد، وإذا احتاج الأمر لتثبيت موديل أو سعر أو توصيل اطلبي التوضيح بدقة.",
+                "أنت مريم، مساعدة صفحة The Viral Creature في تونس. تحدثي بلهجة تونسية واضحة، هادئة، صادقة ومباشرة دون مبالغة أو وعود غير مؤكدة أو هلوسة. أجيبي مباشرة على السؤال أو التعليق باختصار مفيد وواضح، وإذا احتاج الأمر لتثبيت موديل أو مقاس أو سعر أو توصيل اطلبي التوضيح بدقة.",
             },
             {
               role: "user",
@@ -222,7 +230,7 @@ async function generateMariamReply(
     }
   }
 
-  return buildDynamicReply(clean, channel);
+  return buildNaturalFallbackReply(clean, channel);
 }
 
 export async function GET(req: NextRequest) {
@@ -254,7 +262,10 @@ export async function POST(req: NextRequest) {
     });
 
     if (body?.object !== "page" || !Array.isArray(body?.entry)) {
-      return NextResponse.json({ status: "ignored", build: BUILD_TAG }, { status: 200 });
+      return NextResponse.json(
+        { status: "ignored", build: BUILD_TAG },
+        { status: 200 }
+      );
     }
 
     for (const entry of body.entry) {
@@ -285,17 +296,19 @@ export async function POST(req: NextRequest) {
             continue;
           }
 
-          const midKey = mid ? `msg_${mid}` : `msg_${senderId}_${ev?.timestamp || ""}`;
-          const sameTextKey = `same_m_${senderId}_${msgText.trim()}`;
+          const midKey = mid
+            ? `msg_${mid}`
+            : `msg_${senderId}_${ev?.timestamp || ""}`;
+          const recipientThrottleKey = `throttle_m_${senderId}`;
 
           if (
             isDuplicateEvent(midKey) ||
-            isDuplicateEvent(sameTextKey, SAME_TEXT_WINDOW_MS)
+            isDuplicateEvent(recipientThrottleKey, RECIPIENT_COOLDOWN_MS)
           ) {
-            console.log("[webhook] duplicate messenger skipped:", {
+            console.log("[webhook] duplicate or throttled messenger skipped:", {
               build: BUILD_TAG,
               midKey,
-              sameTextKey,
+              recipientThrottleKey,
             });
             continue;
           }
@@ -325,7 +338,7 @@ export async function POST(req: NextRequest) {
           if (field === "feed" && val?.item === "comment") {
             const verb = val?.verb || "add";
             const commentId = val?.comment_id ? String(val.comment_id) : "";
-            const commenterId = val?.from?.id ? String(val.from?.id) : "";
+            const commenterId = val?.from?.id ? String(val.from.id) : "";
             const messageText =
               typeof val?.message === "string" ? val.message : "";
 
@@ -338,13 +351,13 @@ export async function POST(req: NextRequest) {
             }
 
             const commentKey = `comment_${commentId}`;
-            const sameCommentTextKey = `same_c_${commenterId}_${messageText.trim()}`;
+            const commenterThrottleKey = `throttle_c_${commenterId}`;
 
             if (
               isDuplicateEvent(commentKey) ||
-              isDuplicateEvent(sameCommentTextKey, SAME_TEXT_WINDOW_MS)
+              isDuplicateEvent(commenterThrottleKey, RECIPIENT_COOLDOWN_MS)
             ) {
-              console.log("[webhook] duplicate comment skipped:", {
+              console.log("[webhook] duplicate or throttled comment skipped:", {
                 build: BUILD_TAG,
                 commentKey,
               });
@@ -358,13 +371,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ status: "ok", build: BUILD_TAG }, { status: 200 });
+    return NextResponse.json(
+      { status: "ok", build: BUILD_TAG },
+      { status: 200 }
+    );
   } catch (err) {
     console.error("[webhook] POST error:", {
       build: BUILD_TAG,
       err,
       len: rawBody.length,
     });
-    return NextResponse.json({ status: "ok", build: BUILD_TAG }, { status: 200 });
+    return NextResponse.json(
+      { status: "ok", build: BUILD_TAG },
+      { status: 200 }
+    );
   }
 }
