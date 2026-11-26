@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const BUILD_TAG = "v2026-11-26-clean-reply";
+const BUILD_TAG = "v2026-11-26-upstash-dedupe";
 
 const VERIFY_TOKEN =
   process.env.FB_VERIFY_TOKEN ||
@@ -17,23 +17,78 @@ const PAGE_ACCESS_TOKEN =
 
 const GRAPH_API_VERSION = process.env.FB_GRAPH_VERSION || "v24.0";
 
-const DEDUPE_TTL_MS = 10 * 60 * 1000;
-const RECIPIENT_COOLDOWN_MS = 12 * 1000;
-const seenEvents = new Map<string, number>();
+const UPSTASH_REST_URL = (
+  process.env.UPSTASH_REDIS_REST_URL ||
+  process.env.KV_REST_API_URL ||
+  ""
+).replace(/\/+$/, "");
 
-function isDuplicateEvent(key: string, ttlMs: number = DEDUPE_TTL_MS): boolean {
+const UPSTASH_REST_TOKEN =
+  process.env.UPSTASH_REDIS_REST_TOKEN ||
+  process.env.KV_REST_API_TOKEN ||
+  "";
+
+const DEDUPE_TTL_SEC = 10 * 60;
+const COOLDOWN_TTL_SEC = 12;
+
+const localSeen = new Map<string, number>();
+
+function checkAndSetLocal(key: string, ttlSec: number): boolean {
   const now = Date.now();
-  for (const [k, exp] of seenEvents.entries()) {
+  for (const [k, exp] of localSeen.entries()) {
     if (exp <= now) {
-      seenEvents.delete(k);
+      localSeen.delete(k);
     }
   }
-  const existingExp = seenEvents.get(key);
-  if (existingExp && existingExp > now) {
+  const currentExp = localSeen.get(key);
+  if (currentExp && currentExp > now) {
+    return false;
+  }
+  localSeen.set(key, now + ttlSec * 1000);
+  return true;
+}
+
+async function acquireDistributedLock(
+  key: string,
+  ttlSec: number
+): Promise<boolean> {
+  const localAcquired = checkAndSetLocal(key, ttlSec);
+  if (!localAcquired) {
+    return false;
+  }
+
+  if (!UPSTASH_REST_URL || !UPSTASH_REST_TOKEN) {
     return true;
   }
-  seenEvents.set(key, now + ttlMs);
-  return false;
+
+  try {
+    const encodedKey = encodeURIComponent(key);
+    const url = `${UPSTASH_REST_URL}/set/${encodedKey}/1?NX=true&EX=${ttlSec}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${UPSTASH_REST_TOKEN}`,
+      },
+    });
+
+    if (!res.ok) {
+      console.warn("[webhook] Upstash SET non-ok:", {
+        build: BUILD_TAG,
+        status: res.status,
+      });
+      return true;
+    }
+
+    const data = await res.json();
+    // Upstash returns { result: "OK" } when NX succeeds, or { result: null } when key already exists
+    return data?.result === "OK";
+  } catch (err) {
+    console.warn("[webhook] Upstash SET error, falling back to local:", {
+      build: BUILD_TAG,
+      err,
+    });
+    return true;
+  }
 }
 
 async function sendMessengerReply(recipientId: string, text: string) {
@@ -259,6 +314,7 @@ export async function POST(req: NextRequest) {
       object: body?.object,
       entries: Array.isArray(body?.entry) ? body.entry.length : 0,
       hasToken: Boolean(PAGE_ACCESS_TOKEN),
+      hasUpstash: Boolean(UPSTASH_REST_URL && UPSTASH_REST_TOKEN),
     });
 
     if (body?.object !== "page" || !Array.isArray(body?.entry)) {
@@ -297,18 +353,23 @@ export async function POST(req: NextRequest) {
           }
 
           const midKey = mid
-            ? `msg_${mid}`
-            : `msg_${senderId}_${ev?.timestamp || ""}`;
-          const recipientThrottleKey = `throttle_m_${senderId}`;
+            ? `livefatt:msg:${mid}`
+            : `livefatt:msg:${senderId}:${ev?.timestamp || ""}`;
+          const cooldownKey = `livefatt:cd_m:${senderId}`;
 
-          if (
-            isDuplicateEvent(midKey) ||
-            isDuplicateEvent(recipientThrottleKey, RECIPIENT_COOLDOWN_MS)
-          ) {
-            console.log("[webhook] duplicate or throttled messenger skipped:", {
+          const gotMidLock = await acquireDistributedLock(midKey, DEDUPE_TTL_SEC);
+          const gotCooldownLock = await acquireDistributedLock(
+            cooldownKey,
+            COOLDOWN_TTL_SEC
+          );
+
+          if (!gotMidLock || !gotCooldownLock) {
+            console.log("[webhook] duplicate or cooldown messenger skipped:", {
               build: BUILD_TAG,
               midKey,
-              recipientThrottleKey,
+              cooldownKey,
+              gotMidLock,
+              gotCooldownLock,
             });
             continue;
           }
@@ -350,14 +411,20 @@ export async function POST(req: NextRequest) {
               continue;
             }
 
-            const commentKey = `comment_${commentId}`;
-            const commenterThrottleKey = `throttle_c_${commenterId}`;
+            const commentKey = `livefatt:comment:${commentId}`;
+            const commentCooldownKey = `livefatt:cd_c:${commenterId}`;
 
-            if (
-              isDuplicateEvent(commentKey) ||
-              isDuplicateEvent(commenterThrottleKey, RECIPIENT_COOLDOWN_MS)
-            ) {
-              console.log("[webhook] duplicate or throttled comment skipped:", {
+            const gotCommentLock = await acquireDistributedLock(
+              commentKey,
+              DEDUPE_TTL_SEC
+            );
+            const gotCommentCooldown = await acquireDistributedLock(
+              commentCooldownKey,
+              COOLDOWN_TTL_SEC
+            );
+
+            if (!gotCommentLock || !gotCommentCooldown) {
+              console.log("[webhook] duplicate or cooldown comment skipped:", {
                 build: BUILD_TAG,
                 commentKey,
               });
