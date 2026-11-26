@@ -33,9 +33,41 @@ function isDuplicateEvent(key: string): boolean {
   return false;
 }
 
+async function sendMessengerReply(recipientId: string, text: string) {
+  if (!PAGE_ACCESS_TOKEN) {
+    console.error("[webhook] missing FB_PAGE_ACCESS_TOKEN for messenger");
+    return;
+  }
+
+  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/me/messages?access_token=${encodeURIComponent(
+    PAGE_ACCESS_TOKEN
+  )}`;
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recipient: { id: recipientId },
+        messaging_type: "RESPONSE",
+        message: { text },
+      }),
+    });
+    const raw = await res.text();
+    console.log("[webhook] Graph API messenger reply:", {
+      recipientId,
+      status: res.status,
+      ok: res.ok,
+      body: raw,
+    });
+  } catch (err) {
+    console.error("[webhook] sendMessengerReply network err:", err);
+  }
+}
+
 async function sendCommentReply(commentId: string, message: string) {
   if (!PAGE_ACCESS_TOKEN) {
-    console.error("[webhook] missing FB_PAGE_ACCESS_TOKEN");
+    console.error("[webhook] missing FB_PAGE_ACCESS_TOKEN for comment");
     return;
   }
 
@@ -49,24 +81,24 @@ async function sendCommentReply(commentId: string, message: string) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message }),
     });
-    const text = await res.text();
+    const raw = await res.text();
     console.log("[webhook] Graph API comment reply:", {
       commentId,
       status: res.status,
       ok: res.ok,
-      body: text,
+      body: raw,
     });
   } catch (err) {
     console.error("[webhook] sendCommentReply network err:", err);
   }
 }
 
-function buildCalmReply(commentText: string): string {
-  const clean = (commentText || "").trim();
+function buildCalmReply(inputText: string): string {
+  const clean = (inputText || "").trim();
   if (!clean) {
-    return "أهلاً بك. تفضل باكتب سؤالك بوضوح هنا أو ابعثلنا على الميسنجر باش نعاونوك.";
+    return "أهلاً بك. تفضل قولي بوضوح شنوة تحب تعرف أو تطلب، ونثبتولك التفاصيل قبل أي تأكيد.";
   }
-  return "أهلاً بك. بالنسبة للمعلومة أو التوفر أو الطلب، نثبتولك المعطيات الدقيقة قبل أي تأكيد. إذا تحب تبعث تفاصيل أكثر أو تطلب، تفضل على الميسنجر ونجاوبوك بوضوح.";
+  return "أهلاً بك. وصلتنا رسالتك، ونثبتولك المعطيات الدقيقة قبل أي تأكيد. إذا تحب تزيد توضح شنوة حاجتك بالضبط (الموديل، اللون، أو الاستفسار) أنا معاك.";
 }
 
 export async function GET(req: NextRequest) {
@@ -93,6 +125,7 @@ export async function POST(req: NextRequest) {
     console.log("[webhook] POST received:", {
       object: body?.object,
       entryCount: Array.isArray(body?.entry) ? body.entry.length : 0,
+      hasToken: Boolean(PAGE_ACCESS_TOKEN),
     });
 
     if (body?.object !== "page" || !Array.isArray(body?.entry)) {
@@ -101,6 +134,44 @@ export async function POST(req: NextRequest) {
 
     for (const entry of body.entry) {
       const pageId = entry?.id ? String(entry.id) : "";
+
+      if (Array.isArray(entry?.messaging)) {
+        for (const ev of entry.messaging) {
+          const senderId = ev?.sender?.id ? String(ev.sender.id) : "";
+          const recipientId = ev?.recipient?.id ? String(ev.recipient.id) : "";
+          const mid = ev?.message?.mid ? String(ev.message.mid) : "";
+          const isEcho = Boolean(ev?.message?.is_echo);
+          const msgText =
+            typeof ev?.message?.text === "string" ? ev.message.text : "";
+
+          console.log("[webhook] messaging event:", {
+            pageId,
+            senderId,
+            recipientId,
+            mid,
+            isEcho,
+            hasText: Boolean(msgText),
+          });
+
+          if (!senderId || !ev?.message || isEcho) {
+            continue;
+          }
+
+          if (pageId && senderId === pageId) {
+            console.log("[webhook] skip message sent by page itself");
+            continue;
+          }
+
+          const dedupeKey = mid ? `msg_${mid}` : `msg_${senderId}_${ev?.timestamp || ""}`;
+          if (isDuplicateEvent(dedupeKey)) {
+            console.log("[webhook] duplicate messenger skipped:", dedupeKey);
+            continue;
+          }
+
+          const reply = buildCalmReply(msgText);
+          await sendMessengerReply(senderId, reply);
+        }
+      }
 
       if (Array.isArray(entry?.changes)) {
         for (const ch of entry.changes) {
@@ -121,26 +192,19 @@ export async function POST(req: NextRequest) {
             const verb = val?.verb || "add";
             const commentId = val?.comment_id ? String(val.comment_id) : "";
             const commenterId = val?.from?.id ? String(val.from?.id) : "";
-            const messageText = typeof val?.message === "string" ? val.message : "";
+            const messageText =
+              typeof val?.message === "string" ? val.message : "";
 
-            if (verb !== "add") {
-              console.log("[webhook] skip comment verb:", verb);
-              continue;
-            }
-
-            if (!commentId) {
-              console.log("[webhook] missing comment_id");
+            if (verb !== "add" || !commentId) {
               continue;
             }
 
             if (pageId && commenterId === pageId) {
-              console.log("[webhook] comment made by page itself, skipping");
               continue;
             }
 
             const dedupeKey = `feed_comment_${commentId}`;
             if (isDuplicateEvent(dedupeKey)) {
-              console.log("[webhook] duplicate comment skipped:", commentId);
               continue;
             }
 
