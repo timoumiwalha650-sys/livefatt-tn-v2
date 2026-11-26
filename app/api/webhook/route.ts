@@ -54,14 +54,14 @@ async function sendMessengerReply(recipientId: string, text: string) {
       }),
     });
     const raw = await res.text();
-    console.log("[webhook] Graph API messenger reply:", {
+    console.log("[webhook] messenger reply result:", {
       recipientId,
       status: res.status,
       ok: res.ok,
-      body: raw,
+      raw,
     });
   } catch (err) {
-    console.error("[webhook] sendMessengerReply network err:", err);
+    console.error("[webhook] sendMessengerReply network error:", err);
   }
 }
 
@@ -82,23 +82,23 @@ async function sendCommentReply(commentId: string, message: string) {
       body: JSON.stringify({ message }),
     });
     const raw = await res.text();
-    console.log("[webhook] Graph API comment reply:", {
+    console.log("[webhook] comment reply result:", {
       commentId,
       status: res.status,
       ok: res.ok,
-      body: raw,
+      raw,
     });
   } catch (err) {
-    console.error("[webhook] sendCommentReply network err:", err);
+    console.error("[webhook] sendCommentReply network error:", err);
   }
 }
 
-function buildCalmReply(inputText: string): string {
-  const clean = (inputText || "").trim();
+function buildMariamReply(rawText: string): string {
+  const clean = (rawText || "").trim();
   if (!clean) {
-    return "أهلاً بك. تفضل قولي بوضوح شنوة تحب تعرف أو تطلب، ونثبتولك التفاصيل قبل أي تأكيد.";
+    return "أهلاً بك. تفضل قولي شنوة تحب تعرف أو تطلب بالضبط، ونثبتولك التفاصيل قبل أي تأكيد.";
   }
-  return "أهلاً بك. وصلتنا رسالتك، ونثبتولك المعطيات الدقيقة قبل أي تأكيد. إذا تحب تزيد توضح شنوة حاجتك بالضبط (الموديل، اللون، أو الاستفسار) أنا معاك.";
+  return "أهلاً بك. وصلتنا رسالتك أو تعليقك، ونثبتولك المعطيات الدقيقة قبل أي تأكيد. إذا تحب تزيد توضح شنوة حاجتك (الموديل، المقاس أو اللون، أو الاستفسار) أنا معاك.";
 }
 
 export async function GET(req: NextRequest) {
@@ -124,21 +124,21 @@ export async function POST(req: NextRequest) {
 
     console.log("[webhook] POST received:", {
       object: body?.object,
-      entryCount: Array.isArray(body?.entry) ? body.entry.length : 0,
+      entries: Array.isArray(body?.entry) ? body.entry.length : 0,
       hasToken: Boolean(PAGE_ACCESS_TOKEN),
     });
 
     if (body?.object !== "page" || !Array.isArray(body?.entry)) {
-      return NextResponse.json({ status: "ignored_non_page" }, { status: 200 });
+      return NextResponse.json({ status: "ignored" }, { status: 200 });
     }
 
     for (const entry of body.entry) {
       const pageId = entry?.id ? String(entry.id) : "";
 
+      // 1. معالجة رسائل Messenger
       if (Array.isArray(entry?.messaging)) {
         for (const ev of entry.messaging) {
           const senderId = ev?.sender?.id ? String(ev.sender.id) : "";
-          const recipientId = ev?.recipient?.id ? String(ev.recipient.id) : "";
           const mid = ev?.message?.mid ? String(ev.message.mid) : "";
           const isEcho = Boolean(ev?.message?.is_echo);
           const msgText =
@@ -147,7 +147,6 @@ export async function POST(req: NextRequest) {
           console.log("[webhook] messaging event:", {
             pageId,
             senderId,
-            recipientId,
             mid,
             isEcho,
             hasText: Boolean(msgText),
@@ -158,34 +157,34 @@ export async function POST(req: NextRequest) {
           }
 
           if (pageId && senderId === pageId) {
-            console.log("[webhook] skip message sent by page itself");
             continue;
           }
 
-          const dedupeKey = mid ? `msg_${mid}` : `msg_${senderId}_${ev?.timestamp || ""}`;
-          if (isDuplicateEvent(dedupeKey)) {
-            console.log("[webhook] duplicate messenger skipped:", dedupeKey);
+          const key = mid ? `msg_${mid}` : `msg_${senderId}_${ev?.timestamp || ""}`;
+          if (isDuplicateEvent(key)) {
+            console.log("[webhook] duplicate message skipped:", key);
             continue;
           }
 
-          const reply = buildCalmReply(msgText);
-          await sendMessengerReply(senderId, reply);
+          await sendMessengerReply(senderId, buildMariamReply(msgText));
         }
       }
 
+      // 2. معالجة تعليقات feed (على المنشورات العادية والبث المباشر / اللايف)
       if (Array.isArray(entry?.changes)) {
         for (const ch of entry.changes) {
           const field = ch?.field;
           const val = ch?.value || {};
-          console.log("[webhook] change entry:", {
+
+          console.log("[webhook] feed/change event:", {
             pageId,
             field,
             item: val?.item,
             verb: val?.verb,
+            postId: val?.post_id,
             commentId: val?.comment_id,
             fromId: val?.from?.id,
-            fromName: val?.from?.name,
-            message: val?.message,
+            hasMessage: Boolean(val?.message),
           });
 
           if (field === "feed" && val?.item === "comment") {
@@ -200,16 +199,17 @@ export async function POST(req: NextRequest) {
             }
 
             if (pageId && commenterId === pageId) {
+              console.log("[webhook] skip own page comment");
               continue;
             }
 
-            const dedupeKey = `feed_comment_${commentId}`;
-            if (isDuplicateEvent(dedupeKey)) {
+            const key = `comment_${commentId}`;
+            if (isDuplicateEvent(key)) {
+              console.log("[webhook] duplicate comment skipped:", key);
               continue;
             }
 
-            const replyText = buildCalmReply(messageText);
-            await sendCommentReply(commentId, replyText);
+            await sendCommentReply(commentId, buildMariamReply(messageText));
           }
         }
       }
@@ -217,7 +217,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ status: "ok" }, { status: 200 });
   } catch (err) {
-    console.error("[webhook] POST error:", err, "rawLen:", rawBody.length);
-    return NextResponse.json({ status: "error_handled" }, { status: 200 });
+    console.error("[webhook] POST error:", err, "len:", rawBody.length);
+    return NextResponse.json({ status: "ok" }, { status: 200 });
   }
 }
